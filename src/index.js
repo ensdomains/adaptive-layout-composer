@@ -43,7 +43,7 @@ const ENS_V2_LAYOUT = {
   ACCENT_Y: 388,
   RIGHT_MARGIN: 12,                     // Closest the accent square may get to the right edge
   CORNER_RADIUS: 6,
-  COLORS: { label: '#0082BB', accent: '#F6FBFD', logo: '#0082BB' },
+  COLORS: { label: '#F6FBFD', accent: '#0082BB', logo: '#F6FBFD' },
   BACKGROUND_COLOR: '#F6FBFD',
   LOGO_PATH: 'M42.7634 487.399C42.6074 487.163 42.8942 486.886 43.127 487.049L52.8702 493.832C59.011 498.107 61.8385 505.74 59.8916 512.934C59.7373 513.504 59.5719 514.003 59.4164 514.421C59.3201 514.68 58.937 514.624 58.9176 514.348C58.7534 512.006 57.0577 509.328 55.827 507.385C55.6073 507.038 55.4024 506.714 55.2237 506.42C54.0275 504.452 45.3683 491.34 42.7634 487.399ZM29.8625 506.477L41.5249 487.39C41.6603 487.169 41.4166 486.91 41.1853 487.03C39.1465 488.088 33.6454 491.147 29.3265 495.437C24.5934 500.138 28.4184 505.297 29.4451 506.509C29.5586 506.643 29.7711 506.627 29.8625 506.477ZM41.2366 528.601C41.3926 528.837 41.1058 529.113 40.873 528.951L31.1298 522.168C24.989 517.893 22.1615 510.26 24.1084 503.066C24.2627 502.496 24.4281 501.997 24.5836 501.579C24.6799 501.32 25.063 501.376 25.0824 501.652C25.2466 503.994 26.9423 506.672 28.173 508.615L28.1731 508.616L28.1733 508.616C28.3929 508.963 28.5977 509.286 28.7763 509.58C29.9725 511.548 38.6317 524.66 41.2366 528.601ZM42.4761 528.607L54.1384 509.521C54.2299 509.371 54.4424 509.355 54.5558 509.488C55.5825 510.701 59.4075 515.86 54.6745 520.561C50.3556 524.851 44.8544 527.91 42.8157 528.968C42.5844 529.087 42.3407 528.829 42.4761 528.607Z',
 };
@@ -478,7 +478,7 @@ async function createEnsV2SVGImage(options) {
  * @param {'natural'|'exact'} [options.fitMode='natural'] - `'natural'` lets the renderer shape the text at its own width (fastest). `'exact'` emits `textLength`+`lengthAdjust="spacingAndGlyphs"` so the renderer compresses or stretches glyphs to match the width the library measured — use this when the rasterizer's fonts differ from the library's measurement assumptions (e.g. server-side resvg with different fonts).
  * @param {'ens-v2'} [options.layout] - `'ens-v2'` renders the ENS v2 card (logo tile, name label, accent square). Omit for the layouts above. In this layout `width`/`height` default to 550, `maxFontSize` (default 60) is in 550-unit design space, `backgroundImageUrl` must be a `data:` URI, `backgroundColor` defaults to `'#F6FBFD'`, and `textColor`, `autoFontSize`, `fontSize`, `textX`/`textY`, `maxTextWidth` and `ensStyle` are ignored.
  * @param {string|null} [options.backgroundMarkup=null] - ens-v2 only: trusted SVG fragment covering width × height, inserted verbatim as the background when there is no avatar
- * @param {{label?: string, accent?: string, logo?: string}} [options.colors] - ens-v2 only: label `'#0082BB'`, accent `'#F6FBFD'` (logo tile, name, accent square), logo `'#0082BB'`
+ * @param {{label?: string, accent?: string, logo?: string}} [options.colors] - ens-v2 only: label `'#F6FBFD'`, accent `'#0082BB'` (logo tile, name, accent square), logo `'#F6FBFD'`
  * @returns {Promise<Uint8Array>} SVG data as UTF-8 encoded byte array
  * @example
  * // Generate with default ENS style

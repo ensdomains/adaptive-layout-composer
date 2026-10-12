@@ -82,7 +82,7 @@ const svgData = await createDynamicSVGImage({
   backgroundImageUrl: 'data:image/png;base64,...', // avatar; must be a data: URI
   // backgroundMarkup: '<g>...</g>', // used when there is no avatar
   // backgroundColor: '#F6FBFD',     // used when there is neither
-  // colors: { label: '#0082BB', accent: '#F6FBFD', logo: '#0082BB' },
+  // colors: { label: '#F6FBFD', accent: '#0082BB', logo: '#F6FBFD' },
 });
 ```
 
@@ -93,9 +93,9 @@ const svgData = await createDynamicSVGImage({
 | `backgroundImageUrl` | `null` | Avatar. Only `data:` URIs are used (nothing is fetched). Emitted as `<image href="…" width="…" height="…" preserveAspectRatio="xMidYMid slice"/>`. |
 | `backgroundMarkup` | `null` | Trusted SVG fragment covering `width × height`, inserted verbatim when there is no avatar. |
 | `backgroundColor` | `'#F6FBFD'` | Solid background when there is neither. Accepts a CSS colour, `[r, g, b, a]`, or `'transparent'` for none. |
-| `colors.label` | `'#0082BB'` | Name label. |
-| `colors.accent` | `'#F6FBFD'` | Logo tile, name and accent square. |
-| `colors.logo` | `'#0082BB'` | ENS logo. |
+| `colors.label` | `'#F6FBFD'` | Name label. |
+| `colors.accent` | `'#0082BB'` | Logo tile, name and accent square. |
+| `colors.logo` | `'#F6FBFD'` | ENS logo. |
 | `maxFontSize` | `60` | In design units. 60 puts Satoshi Bold's ascenders 44.8 units above the baseline, as in the design. |
 | `fontFamily`, `fontBase64`, `customElements`, `fitMode` | as above | `customElements` paint on top of the card. |
 
