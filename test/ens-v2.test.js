@@ -225,3 +225,29 @@ test('non-positive sizes are rejected', async () => {
   await assert.rejects(v2({ text: 'a.eth', height: -5 }), RangeError);
   await assert.rejects(v2({ text: 'a.eth', width: 'abc' }), RangeError);
 });
+
+test('CJK and mixed names: Satoshi glyphs measured exactly, full-width characters at 1 em', async () => {
+  const cases = [
+    ['你好世界.eth', size => 4 * size + browserAdvance('.eth', size)],
+    ['こんにちは.eth', size => 5 * size + browserAdvance('.eth', size)],
+    ['안녕하세요.eth', size => 5 * size + browserAdvance('.eth', size)],
+    ['crypto中文.eth', size => browserAdvance('crypto', size) + 2 * size + browserAdvance('.eth', size)],
+    ['ｶﾀｶﾅ.eth', size => 4 * size / 2 + browserAdvance('.eth', size)],
+  ];
+  for (const fontFamily of ['Satoshi', 'sans-serif']) {
+    for (const [text, expectedWidth] of cases) {
+      const p = parse(await v2({ text, fontFamily }));
+      const width = expectedWidth(p.fontSize);
+      assert.ok(Math.abs(p.labelWidth - (34 + width)) < 0.01, `${text} (${fontFamily}): label ${p.labelWidth}, expected ${34 + width}`);
+      assert.ok(p.accentX <= 506);
+    }
+  }
+});
+
+test('emoji names: Latin part exact, emoji estimated, label inside the limit', async () => {
+  const { metrics } = await expectedSize('🚀rocket.eth', 398 * 0.85);
+  assert.equal(metrics.isAccurate, false, 'emoji width is an estimate');
+  assert.ok(metrics.width > browserAdvance('rocket.eth', 60) * 0.5);
+  const p = parse(await v2({ text: '👨‍👩‍👧‍👦🚀rocket.eth' }));
+  assert.ok(Number.isFinite(p.labelWidth) && p.accentX <= 506);
+});

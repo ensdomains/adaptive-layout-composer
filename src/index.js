@@ -226,26 +226,87 @@ function singleSubstitutions(font, features) {
   return perFont.get(key);
 }
 
-// Advance width as a browser lays the text out: the given features on, ligatures off
-// (font-variant-ligatures: none), GPOS kerning on.
-function advanceWidthWithFeatures(font, text, fontSize, features) {
+// East Asian full-width characters. CJK fonts draw these at 1 em; half-width forms at 0.5 em.
+const FULL_WIDTH_RANGES = [
+  [0x1100, 0x115F],   // Hangul Jamo (leading consonants)
+  [0x2E80, 0x303E],   // CJK radicals, Kangxi radicals, ideographic description, CJK symbols and punctuation
+  [0x3041, 0x33FF],   // Hiragana, Katakana, Bopomofo, Hangul compatibility Jamo, Kanbun, CJK strokes, enclosed and compatibility CJK
+  [0x3400, 0x4DBF],   // CJK Extension A
+  [0x4E00, 0x9FFF],   // CJK Unified Ideographs
+  [0xA960, 0xA97F],   // Hangul Jamo Extended-A
+  [0xAC00, 0xD7A3],   // Hangul Syllables
+  [0xF900, 0xFAFF],   // CJK Compatibility Ideographs
+  [0xFE30, 0xFE4F],   // CJK Compatibility Forms
+  [0xFF01, 0xFF60],   // Full-width ASCII and punctuation
+  [0xFFE0, 0xFFE6],   // Full-width signs
+  [0x20000, 0x3FFFD], // CJK Extensions B and later
+];
+const HALF_WIDTH_RANGE = [0xFF61, 0xFFDC]; // Half-width Katakana and Hangul
+
+function eastAsianWidthEm(codePoint) {
+  if (FULL_WIDTH_RANGES.some(([lo, hi]) => codePoint >= lo && codePoint <= hi)) return 1;
+  if (codePoint >= HALF_WIDTH_RANGE[0] && codePoint <= HALF_WIDTH_RANGE[1]) return 0.5;
+  return null;
+}
+
+function graphemes(text) {
+  try {
+    return Array.from(new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(text), s => s.segment);
+  } catch {
+    return Array.from(text);
+  }
+}
+
+/**
+ * Width as a browser lays the text out, one grapheme at a time:
+ * - characters the font has: its glyphs with the given features on, ligatures off
+ *   (font-variant-ligatures: none) and GPOS kerning between neighbours;
+ * - East Asian full-width / half-width characters: 1 em / 0.5 em, as CJK fallback fonts draw them;
+ * - anything else (emoji, scripts the font lacks): the per-character estimate.
+ */
+function measureWithFeatures(font, text, fontSize, fontFamily, features) {
   const substitutions = singleSubstitutions(font, features);
-  const glyphs = Array.from(text, ch => {
-    const glyph = font.charToGlyph(ch);
-    return (substitutions.has(glyph.index) && font.glyphs.get(substitutions.get(glyph.index))) || glyph;
-  });
   const kerningLookups = font.position.getKerningTables(font.position.getDefaultScriptName());
-  let units = 0;
-  glyphs.forEach((glyph, i) => {
-    units += glyph.advanceWidth || 0;
-    const next = glyphs[i + 1];
-    if (next) {
-      units += kerningLookups
-        ? font.position.getKerningValue(kerningLookups, glyph.index, next.index)
-        : font.getKerningValue(glyph, next);
+  const kern = (left, right) => (kerningLookups
+    ? font.position.getKerningValue(kerningLookups, left.index, right.index)
+    : font.getKerningValue(left, right));
+
+  let fontUnits = 0;  // glyphs drawn from the font
+  let otherWidth = 0; // everything else, in px
+  let estimated = false;
+  let previous = null;
+  for (const grapheme of graphemes(text)) {
+    const glyphs = Array.from(grapheme, ch => font.charToGlyph(ch));
+    if (glyphs.every(glyph => glyph && glyph.index !== 0)) {
+      for (const original of glyphs) {
+        const glyph = (substitutions.has(original.index) && font.glyphs.get(substitutions.get(original.index))) || original;
+        if (previous) fontUnits += kern(previous, glyph);
+        fontUnits += glyph.advanceWidth || 0;
+        previous = glyph;
+      }
+      continue;
     }
-  });
-  return units / font.unitsPerEm * fontSize;
+    previous = null;
+    const em = eastAsianWidthEm(grapheme.codePointAt(0));
+    if (em !== null) {
+      otherWidth += em * fontSize;
+    } else {
+      otherWidth += measureTextFallback(grapheme, fontSize, fontFamily || 'Satoshi').width;
+      estimated = true;
+    }
+  }
+
+  const fontScale = fontSize / font.unitsPerEm;
+  const ascent = font.ascender * fontScale;
+  const descent = Math.abs(font.descender * fontScale);
+  return {
+    width: fontUnits * fontScale + otherWidth,
+    height: ascent + descent,
+    actualBoundingBoxAscent: ascent,
+    actualBoundingBoxDescent: descent,
+    fontName: font.names.fontFamily?.en || 'Unknown',
+    isAccurate: !estimated,
+  };
 }
 
 /**
@@ -255,8 +316,9 @@ function advanceWidthWithFeatures(font, text, fontSize, features) {
  * @param {number} [fontSize=48] - Font size in pixels
  * @param {string} [fontFamily='Arial'] - Font family name for fallback measurement
  * @param {Object} [options={}]
- * @param {string[]} [options.features] - GSUB features the renderer applies (e.g. `['ss01', 'tnum']`). When set and the loaded font
- *   covers the text, width is the advance width of the substituted glyphs (kerning on, ligatures off) instead of the default estimate.
+ * @param {string[]} [options.features] - GSUB features the renderer applies (e.g. `['ss01', 'tnum']`). When set and a font is loaded,
+ *   width is measured per character: the font's substituted glyphs (kerning on, ligatures off), 1 em for full-width CJK,
+ *   and the estimate only for characters the font lacks (emoji, other scripts).
  * @returns {Promise<Object>} Measurement object containing:
  *   - width: Text width in pixels
  *   - height: Text height in pixels
@@ -273,6 +335,10 @@ async function measureTextAccurate(text, fontSize = 48, fontFamily = 'Arial', { 
   const classification = classifyText(text);
   const requiresSpecialFont = classification.hasCJK;
   const hasEmojis = classification.hasEmoji;
+
+  if (font && features) {
+    return measureWithFeatures(font, text, fontSize, fontFamily, features);
+  }
 
   // for text with emojis, skip OpenType.js entirely. it's very inaccurate with compound emojis
   if (hasEmojis) {
@@ -312,10 +378,7 @@ async function measureTextAccurate(text, fontSize = 48, fontFamily = 'Arial', { 
 
       // Apply digit-specific adjustments for better spacing
       let adjustedWidth;
-      if (features) {
-        // Lay out the glyphs the renderer will draw; no digit padding needed then.
-        adjustedWidth = advanceWidthWithFeatures(font, text, fontSize, features);
-      } else if (hasMultipleDigits) {
+      if (hasMultipleDigits) {
         // Digits in proportional fonts can have inconsistent spacing
         // Add extra padding when multiple digits are present
         const digitPadding = digitCount * fontSize * TEXT_MEASUREMENT.DIGIT_PADDING_FACTOR;
