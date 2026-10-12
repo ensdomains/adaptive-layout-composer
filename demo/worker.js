@@ -105,6 +105,15 @@ curl -X POST http://localhost:8787 \\
         }
       }
 
+      // ens-v2 only embeds data: URIs, so fetch the demo's image URL here the way the metadata service would.
+      if (options.layout === 'ens-v2' && /^https?:\/\//.test(options.backgroundImageUrl || '')) {
+        const imageResponse = await fetch(options.backgroundImageUrl);
+        if (imageResponse.ok) {
+          const contentType = imageResponse.headers.get('content-type') || 'image/jpeg';
+          options.backgroundImageUrl = `data:${contentType};base64,${arrayBufferToBase64(await imageResponse.arrayBuffer())}`;
+        }
+      }
+
       // Initialize Satoshi font for accurate text measurement
       await initializeFont(satoshiFont);
 
