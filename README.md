@@ -67,6 +67,40 @@ const svgData = await createDynamicSVGImage({
 });
 ```
 
+### ENS v2 Card Layout
+
+Pass `layout: 'ens-v2'` for the ENS v2 NFT card: the background (an avatar, your own SVG markup or a solid colour), an ENS logo tile bottom-left, and the name on a label with an accent square on its top-right corner.
+
+```javascript
+const svgData = await createDynamicSVGImage({
+  layout: 'ens-v2',
+  text: 'tanrikulu.eth',            // inserted as given: escape it yourself
+  width: 550,
+  height: 550,
+  fontFamily: 'Satoshi',
+  fontBase64: satoshiBase64,
+  backgroundImageUrl: 'data:image/png;base64,...', // avatar; must be a data: URI
+  // backgroundMarkup: '<g>...</g>', // used when there is no avatar
+  // backgroundColor: '#F6FBFD',     // used when there is neither
+  // colors: { label: '#F6FBFD', accent: '#0082BB', logo: '#F6FBFD' },
+});
+```
+
+| Option | Default | Notes |
+|---|---|---|
+| `layout` | – | `'ens-v2'` selects this layout. Without it, the existing layouts are unchanged. |
+| `width`, `height` | `550` | Any size. The card is drawn in a 550-unit design space, scaled by `min(width, height) / 550` and anchored bottom-left. The background fills the full canvas. |
+| `backgroundImageUrl` | `null` | Avatar. Only `data:` URIs are used (nothing is fetched). Emitted as `<image href="…" width="…" height="…" preserveAspectRatio="xMidYMid slice"/>`. |
+| `backgroundMarkup` | `null` | Trusted SVG fragment covering `width × height`, inserted verbatim when there is no avatar. |
+| `backgroundColor` | `'#F6FBFD'` | Solid background when there is neither. Accepts a CSS colour, `[r, g, b, a]`, or `'transparent'` for none. |
+| `colors.label` | `'#F6FBFD'` | Name label. |
+| `colors.accent` | `'#0082BB'` | Logo tile, name and accent square. |
+| `colors.logo` | `'#F6FBFD'` | ENS logo. |
+| `maxFontSize` | `60` | In design units. 60 puts Satoshi Bold's ascenders 44.8 units above the baseline, as in the design. |
+| `fontFamily`, `fontBase64`, `customElements`, `fitMode` | as above | `customElements` paint on top of the card. |
+
+The name shrinks to fit the widest label that keeps the accent square 12 units from the right edge (398 units of text on a square card; wider cards allow more). International and CJK names get 85% of that width.
+
 ### API Reference
 
 #### `createDynamicSVGImage(options)`

@@ -30,6 +30,24 @@ const ENS_LAYOUT = {
   LOGO_SCALE: 1.9,                      // Logo scaling factor
 };
 
+// ENS v2 card layout, in design units on a 550 × 550 canvas
+const ENS_V2_LAYOUT = {
+  DESIGN_SIZE: 550,                     // Design canvas edge; everything below is scaled by min(width, height) / 550
+  MAX_FONT_SIZE: 60,                    // Satoshi Bold ascenders (744/1000 em) reach 44.8 units above the baseline
+  LABEL_X: 74,
+  LABEL_Y: 420,
+  LABEL_HEIGHT: 88,
+  LABEL_PADDING_X: 17,                  // Space between the label edge and the name, each side
+  TEXT_BASELINE_Y: 484,
+  ACCENT_SIZE: 32,
+  ACCENT_Y: 388,
+  RIGHT_MARGIN: 12,                     // Closest the accent square may get to the right edge
+  CORNER_RADIUS: 6,
+  COLORS: { label: '#F6FBFD', accent: '#0082BB', logo: '#F6FBFD' },
+  BACKGROUND_COLOR: '#F6FBFD',
+  LOGO_PATH: 'M42.7634 487.399C42.6074 487.163 42.8942 486.886 43.127 487.049L52.8702 493.832C59.011 498.107 61.8385 505.74 59.8916 512.934C59.7373 513.504 59.5719 514.003 59.4164 514.421C59.3201 514.68 58.937 514.624 58.9176 514.348C58.7534 512.006 57.0577 509.328 55.827 507.385C55.6073 507.038 55.4024 506.714 55.2237 506.42C54.0275 504.452 45.3683 491.34 42.7634 487.399ZM29.8625 506.477L41.5249 487.39C41.6603 487.169 41.4166 486.91 41.1853 487.03C39.1465 488.088 33.6454 491.147 29.3265 495.437C24.5934 500.138 28.4184 505.297 29.4451 506.509C29.5586 506.643 29.7711 506.627 29.8625 506.477ZM41.2366 528.601C41.3926 528.837 41.1058 529.113 40.873 528.951L31.1298 522.168C24.989 517.893 22.1615 510.26 24.1084 503.066C24.2627 502.496 24.4281 501.997 24.5836 501.579C24.6799 501.32 25.063 501.376 25.0824 501.652C25.2466 503.994 26.9423 506.672 28.173 508.615L28.1731 508.616L28.1733 508.616C28.3929 508.963 28.5977 509.286 28.7763 509.58C29.9725 511.548 38.6317 524.66 41.2366 528.601ZM42.4761 528.607L54.1384 509.521C54.2299 509.371 54.4424 509.355 54.5558 509.488C55.5825 510.701 59.4075 515.86 54.6745 520.561C50.3556 524.851 44.8544 527.91 42.8157 528.968C42.5844 529.087 42.3407 528.829 42.4761 528.607Z',
+};
+
 // Visual effects constants
 const VISUAL_EFFECTS = {
   BACKGROUND_OVERLAY_OPACITY: 0.12,     // Opacity for background image overlay
@@ -333,6 +351,110 @@ async function calculateFontSize(text, maxWidth, maxHeight = null, minFontSize =
 }
 
 
+// The @font-face and `text` style block shared by the ENS layouts.
+function textStyleDefs(fontFamily, fontBase64) {
+  return `${fontBase64 ? `<style type="text/css">
+        @font-face {
+          font-family: "${fontFamily}";
+          font-style: normal;
+          font-weight: 600 900;
+          src: url(data:font/truetype;base64,${fontBase64});
+        }
+      </style>` : ''}
+      <style>
+        text {
+          font-family: '${fontFamily}', sans-serif, 'Noto Color Emoji', 'Apple Color Emoji';
+          font-style: normal;
+          font-variant-numeric: tabular-nums;
+          font-weight: bold;
+          font-variant-ligatures: none;
+          font-feature-settings: "ss01" on, "ss03" on;
+          -moz-font-feature-settings: "ss01" on, "ss03" on;
+          line-height: ${VISUAL_EFFECTS.TEXT_LINE_HEIGHT}px;
+        }
+      </style>`;
+}
+
+function joinCustomElements(customElements) {
+  return Array.isArray(customElements)
+    ? customElements.filter(el => typeof el === 'string' && el.length > 0).join('\n    ')
+    : '';
+}
+
+function resolveColor(color) {
+  return Array.isArray(color)
+    ? `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] ?? 1})`
+    : (typeof color === 'string' ? color : null);
+}
+
+// Round layout numbers so the markup doesn't carry float noise (e.g. 312.97600000000006).
+const round3 = v => +v.toFixed(3);
+
+/**
+ * ENS v2 card: background (avatar, caller markup or solid colour), logo tile,
+ * name label with accent square. See createDynamicSVGImage for the options.
+ */
+async function createEnsV2SVGImage(options) {
+  const L = ENS_V2_LAYOUT;
+  const {
+    width = L.DESIGN_SIZE,
+    height = L.DESIGN_SIZE,
+    text = DEFAULTS.TEXT,
+    backgroundImageUrl = null,
+    backgroundMarkup = null,
+    backgroundColor = L.BACKGROUND_COLOR,
+    maxFontSize = L.MAX_FONT_SIZE,
+    fontFamily = 'sans-serif',
+    fontBase64 = null,
+    customElements = null,
+    fitMode = 'natural',
+  } = options;
+  const colors = { ...L.COLORS, ...options.colors };
+
+  // Scale the design to the card's short edge, anchored bottom-left.
+  const k = Math.min(width, height) / L.DESIGN_SIZE;
+  const fixedWidth = L.LABEL_X + 2 * L.LABEL_PADDING_X + L.ACCENT_SIZE + L.RIGHT_MARGIN;
+  let textAreaWidth = width / k - fixedWidth;
+  if (classifyText(text).isInternational) {
+    textAreaWidth *= ENS_LAYOUT.CJK_WIDTH_FACTOR;
+  }
+
+  // No height cap: Satoshi's line box (1.25 em) would keep names well below the design size.
+  const { fontSize, metrics } = await calculateFontSize(text, textAreaWidth, null, FONT_SIZE.DEFAULT_MIN, maxFontSize, fontFamily);
+  const labelWidth = round3(2 * L.LABEL_PADDING_X + metrics.width);
+  const labelRight = round3(L.LABEL_X + labelWidth);
+
+  let backgroundElement = '';
+  const solidFill = resolveColor(backgroundColor);
+  if (typeof backgroundImageUrl === 'string' && backgroundImageUrl.startsWith('data:')) {
+    backgroundElement = `<image href="${backgroundImageUrl}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
+  } else if (typeof backgroundMarkup === 'string' && backgroundMarkup.length > 0) {
+    backgroundElement = backgroundMarkup;
+  } else if (solidFill && solidFill !== 'transparent') {
+    backgroundElement = `<rect width="${width}" height="${height}" fill="${solidFill}"/>`;
+  }
+
+  const fitAttrs = fitMode === 'exact' && metrics?.width
+    ? ` textLength="${metrics.width.toFixed(2)}" lengthAdjust="spacingAndGlyphs"`
+    : '';
+
+  const svg = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" fill="none" xmlns="http://www.w3.org/2000/svg">
+    ${backgroundElement}
+    <g transform="translate(0 ${height - L.DESIGN_SIZE * k}) scale(${k})">
+      <rect x="12" y="478" width="60" height="60" rx="${L.CORNER_RADIUS}" fill="${colors.accent}"/>
+      <path fill-rule="evenodd" clip-rule="evenodd" d="${L.LOGO_PATH}" fill="${colors.logo}"/>
+      <rect x="${L.LABEL_X}" y="${L.LABEL_Y}" width="${labelWidth}" height="${L.LABEL_HEIGHT}" rx="${L.CORNER_RADIUS}" fill="${colors.label}"/>
+      <text x="${L.LABEL_X + L.LABEL_PADDING_X}" y="${L.TEXT_BASELINE_Y}" font-size="${fontSize}px" fill="${colors.accent}"${fitAttrs}>${text}</text>
+      <rect x="${labelRight}" y="${L.ACCENT_Y}" width="${L.ACCENT_SIZE}" height="${L.ACCENT_SIZE}" rx="${L.CORNER_RADIUS}" fill="${colors.accent}"/>
+    </g>
+    ${joinCustomElements(customElements)}
+    <defs>
+      ${textStyleDefs(fontFamily, fontBase64)}
+    </defs>
+  </svg>`;
+  return new TextEncoder().encode(svg);
+}
+
 /**
  * Generate a dynamic SVG image with adaptive text layout
  * Supports international text, emojis, custom fonts, and background images
@@ -354,6 +476,9 @@ async function calculateFontSize(text, maxWidth, maxHeight = null, minFontSize =
  * @param {string[]|null} [options.customElements=null] - SVG fragments painted on top of the text (e.g. badges, indicators)
  * @param {string|number[]|null} [options.backgroundColor=null] - CSS color string ('#rgb', 'rgba(...)', 'transparent') or [r,g,b,a] array. When set without backgroundImageUrl, replaces the default gradient. `'transparent'` also suppresses the 12% overlay on background images.
  * @param {'natural'|'exact'} [options.fitMode='natural'] - `'natural'` lets the renderer shape the text at its own width (fastest). `'exact'` emits `textLength`+`lengthAdjust="spacingAndGlyphs"` so the renderer compresses or stretches glyphs to match the width the library measured — use this when the rasterizer's fonts differ from the library's measurement assumptions (e.g. server-side resvg with different fonts).
+ * @param {'ens-v2'} [options.layout] - `'ens-v2'` renders the ENS v2 card (logo tile, name label, accent square). Omit for the layouts above. In this layout `width`/`height` default to 550, `maxFontSize` (default 60) is in 550-unit design space, `backgroundImageUrl` must be a `data:` URI, `backgroundColor` defaults to `'#F6FBFD'`, and `textColor`, `autoFontSize`, `fontSize`, `textX`/`textY`, `maxTextWidth` and `ensStyle` are ignored.
+ * @param {string|null} [options.backgroundMarkup=null] - ens-v2 only: trusted SVG fragment covering width × height, inserted verbatim as the background when there is no avatar
+ * @param {{label?: string, accent?: string, logo?: string}} [options.colors] - ens-v2 only: label `'#F6FBFD'`, accent `'#0082BB'` (logo tile, name, accent square), logo `'#F6FBFD'`
  * @returns {Promise<Uint8Array>} SVG data as UTF-8 encoded byte array
  * @example
  * // Generate with default ENS style
@@ -373,6 +498,10 @@ async function calculateFontSize(text, maxWidth, maxHeight = null, minFontSize =
  * });
  */
 async function createDynamicSVGImage(options = {}) {
+  if (options.layout === 'ens-v2') {
+    return createEnsV2SVGImage(options);
+  }
+
   const {
     width = DEFAULTS.WIDTH,
     height = DEFAULTS.HEIGHT,
@@ -392,13 +521,8 @@ async function createDynamicSVGImage(options = {}) {
     fitMode = 'natural' // 'natural' (default — browser/rasterizer measures): or 'exact' (emit textLength+lengthAdjust so the renderer fits glyphs to the library's measured width). Use 'exact' when the rasterizer's fonts differ from the library's measurement assumptions.
   } = options;
 
-  const customElementsMarkup = Array.isArray(customElements)
-    ? customElements.filter(el => typeof el === 'string' && el.length > 0).join('\n    ')
-    : '';
-
-  const resolvedBackgroundColor = Array.isArray(backgroundColor)
-    ? `rgba(${backgroundColor[0]}, ${backgroundColor[1]}, ${backgroundColor[2]}, ${backgroundColor[3] ?? 1})`
-    : (typeof backgroundColor === 'string' ? backgroundColor : null);
+  const customElementsMarkup = joinCustomElements(customElements);
+  const resolvedBackgroundColor = resolveColor(backgroundColor);
 
   // Calculate text area (leave substantial padding for international characters and emojis)
   const hasInternationalChars = classifyText(text).isInternational;
@@ -531,26 +655,7 @@ async function createDynamicSVGImage(options = {}) {
       text-anchor="${textAnchor}"${fitMode === 'exact' && metrics?.width ? ` textLength="${metrics.width.toFixed(2)}" lengthAdjust="spacingAndGlyphs"` : ''}>${text}</text>
     ${customElementsMarkup}
     <defs>
-      ${fontBase64 ? `<style type="text/css">
-        @font-face {
-          font-family: "${fontFamily}";
-          font-style: normal;
-          font-weight: 600 900;
-          src: url(data:font/truetype;base64,${fontBase64});
-        }
-      </style>` : ''}
-      <style>
-        text {
-          font-family: '${fontFamily}', sans-serif, 'Noto Color Emoji', 'Apple Color Emoji';
-          font-style: normal;
-          font-variant-numeric: tabular-nums;
-          font-weight: bold;
-          font-variant-ligatures: none;
-          font-feature-settings: "ss01" on, "ss03" on;
-          -moz-font-feature-settings: "ss01" on, "ss03" on;
-          line-height: ${VISUAL_EFFECTS.TEXT_LINE_HEIGHT}px;
-        }
-      </style>
+      ${textStyleDefs(fontFamily, fontBase64)}
       <linearGradient id="paint0_linear" x1="190.5" y1="302" x2="-64" y2="-172.5" gradientUnits="userSpaceOnUse">
         <stop stop-color="#44BCF0"/>
         <stop offset="0.428185" stop-color="#628BF3"/>

@@ -1,6 +1,6 @@
 {
   "name": "adaptive-layout-composer",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Adaptive layout composer with precise text measurement, dynamic font sizing, and intelligent positioning for international text and emojis",
   "main": "src/index.js",
   "type": "module",
@@ -22,7 +22,7 @@
     "worker"
   ],
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test test/*.test.js",
     "demo:dev": "cd demo && wrangler dev",
     "demo:deploy": "cd demo && wrangler deploy"
   },
