@@ -90,7 +90,7 @@ const svgData = await createDynamicSVGImage({
 |---|---|---|
 | `layout` | – | `'ens-v2'` selects this layout. Without it, the existing layouts are unchanged. |
 | `width`, `height` | `550` | Any size. The card is drawn in a 550-unit design space, scaled by `min(width, height) / 550` and anchored bottom-left. The background fills the full canvas. |
-| `backgroundImageUrl` | `null` | Avatar. Only `data:` URIs are used (nothing is fetched). Emitted as `<image href="…" width="…" height="…" preserveAspectRatio="xMidYMid slice"/>`. |
+| `backgroundImageUrl` | `null` | Avatar. Only `data:` URIs are used (nothing is fetched). Emitted as `<image href="…" width="…" height="…" preserveAspectRatio="xMidYMid slice"/>`, with `&`, `"` and `<` in the URI escaped. |
 | `backgroundMarkup` | `null` | Trusted SVG fragment covering `width × height`, inserted verbatim when there is no avatar. |
 | `backgroundColor` | `'#F6FBFD'` | Solid background when there is neither. Accepts a CSS colour, `[r, g, b, a]`, or `'transparent'` for none. |
 | `colors.label` | `'#F6FBFD'` | Name label. |
@@ -99,7 +99,15 @@ const svgData = await createDynamicSVGImage({
 | `maxFontSize` | `60` | In design units. 60 puts Satoshi Bold's ascenders 44.8 units above the baseline, as in the design. |
 | `fontFamily`, `fontBase64`, `customElements`, `fitMode` | as above | `customElements` paint on top of the card. |
 
-The name shrinks to fit the widest label that keeps the accent square 12 units from the right edge (398 units of text on a square card; wider cards allow more). International and CJK names get 85% of that width.
+The name shrinks to fit the widest label that keeps the accent square 12 units from the right edge (398 units of text on a square card; wider cards allow more). International and CJK names get 85% of that width. As in the ENS style layout, the name never goes below 12 units: a name that doesn't fit at that size (about 55+ characters on a square card) runs past the right edge.
+
+How the label is measured:
+
+- With the font loaded through `initializeFont`, the label fits the glyphs the text style turns on (`ss01`, `ss03`, tabular digits), with kerning and without ligatures. Browsers render exactly that. Renderers that ignore font features (resvg 2.6, for example) draw some names narrower, which leaves extra space on the right of the label.
+- Emoji, and text the loaded font doesn't cover (CJK, for example), are measured by approximation, so their label width is an estimate.
+- `text` is inserted as given, so escape it yourself. Measurement decodes XML entities first: `a&amp;b.eth` is measured as `a&b.eth`.
+
+A `width` or `height` that isn't a positive number throws a `RangeError`.
 
 ### API Reference
 

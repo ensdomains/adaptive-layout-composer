@@ -1,22 +1,42 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import opentype from 'opentype.js';
 import { createDynamicSVGImage, calculateFontSize, initializeFont } from '../src/index.js';
 
 const LOGO_START = 'M42.7634 487.399C42.6074';
 const round3 = v => +v.toFixed(3);
 
+const FEATURES = ['ss01', 'ss03', 'tnum'];
+let satoshi;
+
 before(async () => {
   const buf = fs.readFileSync(new URL('../assets/Satoshi-Bold.ttf', import.meta.url));
-  await initializeFont(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+  const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  await initializeFont(ab);
+  satoshi = opentype.parse(ab);
 });
+
+// Independent check of what a browser lays out: ss01/ss03/tnum glyphs, kerning, no ligatures.
+function browserAdvance(text, fontSize) {
+  const subs = new Map();
+  for (const feature of FEATURES) for (const { sub, by } of satoshi.substitution.getSingle(feature, 'DFLT')) subs.set(sub, by);
+  const glyphs = Array.from(text, ch => satoshi.charToGlyph(ch)).map(g => (subs.has(g.index) ? satoshi.glyphs.get(subs.get(g.index)) : g));
+  const kern = satoshi.position.getKerningTables('DFLT');
+  let units = 0;
+  glyphs.forEach((g, i) => {
+    units += g.advanceWidth;
+    if (glyphs[i + 1]) units += satoshi.position.getKerningValue(kern, g.index, glyphs[i + 1].index);
+  });
+  return units / satoshi.unitsPerEm * fontSize;
+}
 
 async function v2(opts) {
   return new TextDecoder().decode(await createDynamicSVGImage({ layout: 'ens-v2', ...opts }));
 }
 
-// Same inputs the layout passes: 12 min, 60 max, no height cap.
-const expectedSize = (text, textAreaWidth) => calculateFontSize(text, textAreaWidth, null, 12, 60);
+// Same inputs the layout passes: 12 min, 60 max, no height cap, measured with the rendered features.
+const expectedSize = (text, textAreaWidth) => calculateFontSize(text, textAreaWidth, null, 12, 60, undefined, { features: FEATURES });
 
 function parse(svg) {
   const label = svg.match(/<rect x="74" y="420" width="([\d.]+)" height="88" rx="6" fill="([^"]+)"\/>/);
@@ -168,4 +188,40 @@ test('maxFontSize and fitMode are honoured; returns Uint8Array', async () => {
   assert.equal(parse(await v2({ text: 'a.eth', maxFontSize: 40 })).fontSize, 40);
   assert.match(await v2({ text: 'a.eth', fitMode: 'exact' }), /textLength="[\d.]+" lengthAdjust="spacingAndGlyphs"/);
   assert.ok((await createDynamicSVGImage({ layout: 'ens-v2', text: 'a.eth' })) instanceof Uint8Array);
+});
+
+test('label fits the glyphs the style selects (ss01 a, ss03 t, tabular digits)', async () => {
+  for (const text of ['alabama.eth', '1111.eth', '123.eth', '0x1234.eth', 'tanrikulu.eth']) {
+    const p = parse(await v2({ text }));
+    const textWidth = browserAdvance(text, p.fontSize);
+    assert.ok(Math.abs(p.labelWidth - (34 + textWidth)) < 0.01, `${text}: label ${p.labelWidth}, text ${textWidth}`);
+  }
+});
+
+test('escaped text is measured as it renders, inserted as given', async () => {
+  const escaped = parse(await v2({ text: 'a&amp;b.eth' }));
+  const plain = await expectedSize('a&b.eth', 398);
+  assert.equal(escaped.text, 'a&amp;b.eth');
+  assert.equal(escaped.fontSize, plain.fontSize);
+  assert.equal(escaped.labelWidth, round3(34 + plain.metrics.width));
+});
+
+test('avatar href is attribute-escaped so a data: URI cannot inject markup', async () => {
+  const url = 'data:image/svg+xml,"/><script>alert(1)</script><x a="';
+  const svg = await v2({ text: 'a.eth', backgroundImageUrl: url });
+  assert.ok(!svg.includes('<script>'));
+  assert.equal(svg.match(/<image [^>]*>/g).length, 1);
+  assert.ok(svg.includes('href="data:image/svg+xml,&quot;/>&lt;script>alert(1)&lt;/script>&lt;x a=&quot;"'));
+});
+
+test('null or undefined colours keep their defaults', async () => {
+  const p = parse(await v2({ text: 'a.eth', colors: { label: undefined, accent: null, logo: '#123456' } }));
+  assert.equal(p.labelFill, '#F6FBFD');
+  assert.equal(p.textFill, '#0082BB');
+});
+
+test('non-positive sizes are rejected', async () => {
+  await assert.rejects(v2({ text: 'a.eth', width: 0 }), RangeError);
+  await assert.rejects(v2({ text: 'a.eth', height: -5 }), RangeError);
+  await assert.rejects(v2({ text: 'a.eth', width: 'abc' }), RangeError);
 });

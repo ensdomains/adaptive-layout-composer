@@ -45,6 +45,7 @@ const ENS_V2_LAYOUT = {
   CORNER_RADIUS: 6,
   COLORS: { label: '#F6FBFD', accent: '#0082BB', logo: '#F6FBFD' },
   BACKGROUND_COLOR: '#F6FBFD',
+  TEXT_FEATURES: ['ss01', 'ss03', 'tnum'], // What the shared text style turns on; the label is measured with the same glyphs
   LOGO_PATH: 'M42.7634 487.399C42.6074 487.163 42.8942 486.886 43.127 487.049L52.8702 493.832C59.011 498.107 61.8385 505.74 59.8916 512.934C59.7373 513.504 59.5719 514.003 59.4164 514.421C59.3201 514.68 58.937 514.624 58.9176 514.348C58.7534 512.006 57.0577 509.328 55.827 507.385C55.6073 507.038 55.4024 506.714 55.2237 506.42C54.0275 504.452 45.3683 491.34 42.7634 487.399ZM29.8625 506.477L41.5249 487.39C41.6603 487.169 41.4166 486.91 41.1853 487.03C39.1465 488.088 33.6454 491.147 29.3265 495.437C24.5934 500.138 28.4184 505.297 29.4451 506.509C29.5586 506.643 29.7711 506.627 29.8625 506.477ZM41.2366 528.601C41.3926 528.837 41.1058 529.113 40.873 528.951L31.1298 522.168C24.989 517.893 22.1615 510.26 24.1084 503.066C24.2627 502.496 24.4281 501.997 24.5836 501.579C24.6799 501.32 25.063 501.376 25.0824 501.652C25.2466 503.994 26.9423 506.672 28.173 508.615L28.1731 508.616L28.1733 508.616C28.3929 508.963 28.5977 509.286 28.7763 509.58C29.9725 511.548 38.6317 524.66 41.2366 528.601ZM42.4761 528.607L54.1384 509.521C54.2299 509.371 54.4424 509.355 54.5558 509.488C55.5825 510.701 59.4075 515.86 54.6745 520.561C50.3556 524.851 44.8544 527.91 42.8157 528.968C42.5844 529.087 42.3407 528.829 42.4761 528.607Z',
 };
 
@@ -201,12 +202,61 @@ function hasMissingGlyphs(font, text) {
 }
 
 
+// GSUB single substitutions (ss01, tnum, ...) per font, cached by feature list.
+const substitutionCache = new WeakMap();
+function singleSubstitutions(font, features) {
+  let perFont = substitutionCache.get(font);
+  if (!perFont) substitutionCache.set(font, perFont = new Map());
+  const key = features.join(',');
+  if (!perFont.has(key)) {
+    const map = new Map();
+    for (const feature of features) {
+      for (const script of ['DFLT', 'latn']) {
+        try {
+          for (const { sub, by } of font.substitution.getSingle(feature, script) || []) {
+            if (!map.has(sub)) map.set(sub, by);
+          }
+        } catch {
+          // feature or script not in this font
+        }
+      }
+    }
+    perFont.set(key, map);
+  }
+  return perFont.get(key);
+}
+
+// Advance width as a browser lays the text out: the given features on, ligatures off
+// (font-variant-ligatures: none), GPOS kerning on.
+function advanceWidthWithFeatures(font, text, fontSize, features) {
+  const substitutions = singleSubstitutions(font, features);
+  const glyphs = Array.from(text, ch => {
+    const glyph = font.charToGlyph(ch);
+    return (substitutions.has(glyph.index) && font.glyphs.get(substitutions.get(glyph.index))) || glyph;
+  });
+  const kerningLookups = font.position.getKerningTables(font.position.getDefaultScriptName());
+  let units = 0;
+  glyphs.forEach((glyph, i) => {
+    units += glyph.advanceWidth || 0;
+    const next = glyphs[i + 1];
+    if (next) {
+      units += kerningLookups
+        ? font.position.getKerningValue(kerningLookups, glyph.index, next.index)
+        : font.getKerningValue(glyph, next);
+    }
+  });
+  return units / font.unitsPerEm * fontSize;
+}
+
 /**
  * Measure text dimensions accurately using loaded font or fallback to mathematical approximation
  * Automatically handles emojis, international scripts (CJK, Arabic, etc.), and complex text
  * @param {string} text - The text to measure
  * @param {number} [fontSize=48] - Font size in pixels
  * @param {string} [fontFamily='Arial'] - Font family name for fallback measurement
+ * @param {Object} [options={}]
+ * @param {string[]} [options.features] - GSUB features the renderer applies (e.g. `['ss01', 'tnum']`). When set and the loaded font
+ *   covers the text, width is the advance width of the substituted glyphs (kerning on, ligatures off) instead of the default estimate.
  * @returns {Promise<Object>} Measurement object containing:
  *   - width: Text width in pixels
  *   - height: Text height in pixels
@@ -218,7 +268,7 @@ function hasMissingGlyphs(font, text) {
  * const metrics = await measureTextAccurate('Hello 世界', 48, 'Arial');
  * console.log(`Width: ${metrics.width}px, Height: ${metrics.height}px`);
  */
-async function measureTextAccurate(text, fontSize = 48, fontFamily = 'Arial') {
+async function measureTextAccurate(text, fontSize = 48, fontFamily = 'Arial', { features = null } = {}) {
   const font = await initializeFont();
   const classification = classifyText(text);
   const requiresSpecialFont = classification.hasCJK;
@@ -262,7 +312,10 @@ async function measureTextAccurate(text, fontSize = 48, fontFamily = 'Arial') {
 
       // Apply digit-specific adjustments for better spacing
       let adjustedWidth;
-      if (hasMultipleDigits) {
+      if (features) {
+        // Lay out the glyphs the renderer will draw; no digit padding needed then.
+        adjustedWidth = advanceWidthWithFeatures(font, text, fontSize, features);
+      } else if (hasMultipleDigits) {
         // Digits in proportional fonts can have inconsistent spacing
         // Add extra padding when multiple digits are present
         const digitPadding = digitCount * fontSize * TEXT_MEASUREMENT.DIGIT_PADDING_FACTOR;
@@ -308,6 +361,8 @@ async function measureTextAccurate(text, fontSize = 48, fontFamily = 'Arial') {
  * @param {number|null} [maxHeight=null] - Maximum height in pixels (optional)
  * @param {number} [minFontSize=12] - Minimum font size to try
  * @param {number} [maxFontSize=100] - Maximum font size to try
+ * @param {string} [fontFamily] - Font family name for fallback measurement
+ * @param {Object} [measureOptions] - Passed to measureTextAccurate (e.g. `{ features: ['ss01'] }`)
  * @returns {Promise<Object>} Object containing:
  *   - fontSize: Optimal font size in pixels
  *   - metrics: Full measurement object from measureTextAccurate
@@ -315,18 +370,18 @@ async function measureTextAccurate(text, fontSize = 48, fontFamily = 'Arial') {
  * const result = await calculateFontSize('Hello World', 200, 50);
  * console.log(`Use font size: ${result.fontSize}px`);
  */
-async function calculateFontSize(text, maxWidth, maxHeight = null, minFontSize = FONT_SIZE.DEFAULT_MIN, maxFontSize = FONT_SIZE.ABSOLUTE_MAX, fontFamily) {
+async function calculateFontSize(text, maxWidth, maxHeight = null, minFontSize = FONT_SIZE.DEFAULT_MIN, maxFontSize = FONT_SIZE.ABSOLUTE_MAX, fontFamily, measureOptions) {
   const strategy = getTextMeasurementStrategy(text);
   const safeWidth = maxWidth * (1 - strategy.recommendedSafetyMargin);
   const fits = m => m.width <= safeWidth && (!maxHeight || m.height <= maxHeight);
 
   // Early out: smallest size doesn't even fit → just use min.
-  const minMetrics = await measureTextAccurate(text, minFontSize, fontFamily);
+  const minMetrics = await measureTextAccurate(text, minFontSize, fontFamily, measureOptions);
   if (!fits(minMetrics)) {
     return { fontSize: minFontSize, metrics: minMetrics };
   }
   // Early out: largest size fits → no search needed.
-  const maxMetrics = await measureTextAccurate(text, maxFontSize, fontFamily);
+  const maxMetrics = await measureTextAccurate(text, maxFontSize, fontFamily, measureOptions);
   if (fits(maxMetrics)) {
     return { fontSize: maxFontSize, metrics: maxMetrics };
   }
@@ -338,7 +393,7 @@ async function calculateFontSize(text, maxWidth, maxHeight = null, minFontSize =
   let best = { fontSize: minFontSize, metrics: minMetrics };
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
-    const metrics = await measureTextAccurate(text, mid, fontFamily);
+    const metrics = await measureTextAccurate(text, mid, fontFamily, measureOptions);
     debug(`Font size ${mid}: measured=${metrics.width.toFixed(1)}, safeWidth=${safeWidth.toFixed(1)}, maxWidth=${maxWidth.toFixed(1)}`);
     if (fits(metrics)) {
       best = { fontSize: mid, metrics };
@@ -390,6 +445,21 @@ function resolveColor(color) {
 // Round layout numbers so the markup doesn't carry float noise (e.g. 312.97600000000006).
 const round3 = v => +v.toFixed(3);
 
+const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+// The caller passes XML-escaped text; measure the characters the renderer will show.
+function decodeXmlEntities(text) {
+  return text.replace(/&(?:#x([0-9a-fA-F]+)|#([0-9]+)|(amp|lt|gt|quot|apos));/g, (entity, hex, dec, name) => {
+    if (name) return XML_ENTITIES[name];
+    const codePoint = hex ? parseInt(hex, 16) : Number(dec);
+    return codePoint <= 0x10FFFF ? String.fromCodePoint(codePoint) : entity;
+  });
+}
+
+function escapeXmlAttribute(value) {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
 /**
  * ENS v2 card: background (avatar, caller markup or solid colour), logo tile,
  * name label with accent square. See createDynamicSVGImage for the options.
@@ -409,25 +479,33 @@ async function createEnsV2SVGImage(options) {
     customElements = null,
     fitMode = 'natural',
   } = options;
-  const colors = { ...L.COLORS, ...options.colors };
+  if (!(width > 0) || !(height > 0)) {
+    throw new RangeError(`ens-v2 needs a positive width and height, got ${width} × ${height}`);
+  }
+  // A missing colour (undefined/null) keeps its default instead of rendering fill="undefined".
+  const colors = { ...L.COLORS };
+  for (const [key, value] of Object.entries(options.colors || {})) {
+    if (value != null) colors[key] = value;
+  }
+  const measuredText = decodeXmlEntities(String(text));
 
   // Scale the design to the card's short edge, anchored bottom-left.
   const k = Math.min(width, height) / L.DESIGN_SIZE;
   const fixedWidth = L.LABEL_X + 2 * L.LABEL_PADDING_X + L.ACCENT_SIZE + L.RIGHT_MARGIN;
   let textAreaWidth = width / k - fixedWidth;
-  if (classifyText(text).isInternational) {
+  if (classifyText(measuredText).isInternational) {
     textAreaWidth *= ENS_LAYOUT.CJK_WIDTH_FACTOR;
   }
 
   // No height cap: Satoshi's line box (1.25 em) would keep names well below the design size.
-  const { fontSize, metrics } = await calculateFontSize(text, textAreaWidth, null, FONT_SIZE.DEFAULT_MIN, maxFontSize, fontFamily);
+  const { fontSize, metrics } = await calculateFontSize(measuredText, textAreaWidth, null, FONT_SIZE.DEFAULT_MIN, maxFontSize, fontFamily, { features: L.TEXT_FEATURES });
   const labelWidth = round3(2 * L.LABEL_PADDING_X + metrics.width);
   const labelRight = round3(L.LABEL_X + labelWidth);
 
   let backgroundElement = '';
   const solidFill = resolveColor(backgroundColor);
   if (typeof backgroundImageUrl === 'string' && backgroundImageUrl.startsWith('data:')) {
-    backgroundElement = `<image href="${backgroundImageUrl}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
+    backgroundElement = `<image href="${escapeXmlAttribute(backgroundImageUrl)}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
   } else if (typeof backgroundMarkup === 'string' && backgroundMarkup.length > 0) {
     backgroundElement = backgroundMarkup;
   } else if (solidFill && solidFill !== 'transparent') {
