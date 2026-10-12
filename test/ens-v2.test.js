@@ -270,7 +270,37 @@ test('other scripts use their measured per-grapheme widths, independent of fontF
   }
 });
 
-test('Chrome autospace between CJK and Latin is turned off, matching the measurement', async () => {
+test('v2 style: autospace off, tabular digits through font-feature-settings', async () => {
   const svg = await v2({ text: '音乐lover.eth' });
-  assert.match(svg, /text \{ text-autospace: no-autospace; \}/);
+  assert.match(svg, /text-autospace: no-autospace;/);
+  // rasterize-wasm only reads font-feature-settings, so tnum must be there, not only in font-variant-numeric
+  assert.ok(svg.includes('font-feature-settings: "ss01" on, "ss03" on, "tnum" on;'));
+});
+
+test('measureText hook: called with unescaped text and the style features, label follows its width', async () => {
+  const calls = [];
+  const measureText = async (text, fontSize, opts) => {
+    calls.push({ text, fontSize, features: opts.features });
+    return text.length * fontSize * 0.5;
+  };
+  const p = parse(await v2({ text: 'a&amp;b.eth', measureText }));
+  assert.ok(calls.length > 0);
+  assert.ok(calls.every(c => c.text === 'a&b.eth'), 'hook gets the unescaped text');
+  assert.deepEqual(calls[0].features, FEATURES);
+  assert.equal(p.text, 'a&amp;b.eth', 'text is still inserted as given');
+  assert.equal(p.labelWidth, round3(34 + 'a&b.eth'.length * p.fontSize * 0.5));
+});
+
+test('measureText hook: drives the shrink like calculateFontSize, sync hooks work too', async () => {
+  const measureText = (text, fontSize) => text.length * fontSize * 0.6; // synchronous
+  const text = 'averyveryverylongensnamethatneedsshrinking.eth';
+  const p = parse(await v2({ text, measureText }));
+  const expected = await calculateFontSize(text, 398, null, 12, 60, undefined, { features: FEATURES, measureText });
+  assert.equal(p.fontSize, expected.fontSize);
+  assert.ok(p.accentX <= 506);
+});
+
+test('measureText hook: bad hooks fail clearly', async () => {
+  await assert.rejects(v2({ text: 'a.eth', measureText: 'nope' }), TypeError);
+  await assert.rejects(v2({ text: 'a.eth', measureText: () => NaN }), /measureText returned NaN/);
 });

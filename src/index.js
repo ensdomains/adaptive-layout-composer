@@ -340,6 +340,8 @@ function measureWithFeatures(font, text, fontSize, fontFamily, features) {
  * @param {number} [fontSize=48] - Font size in pixels
  * @param {string} [fontFamily='Arial'] - Font family name for fallback measurement
  * @param {Object} [options={}]
+ * @param {Function} [options.measureText] - `(text, fontSize, { features }) => width` (sync or async). When set, it measures
+ *   the width instead of the built-in measurement, e.g. the renderer's own measurement.
  * @param {string[]} [options.features] - GSUB features the renderer applies (e.g. `['ss01', 'tnum']`). When set and a font is loaded,
  *   width is measured per character: the font's substituted glyphs (kerning on, ligatures off), 1 em for full-width CJK,
  *   and the estimate only for characters the font lacks (emoji, other scripts).
@@ -354,8 +356,20 @@ function measureWithFeatures(font, text, fontSize, fontFamily, features) {
  * const metrics = await measureTextAccurate('Hello 世界', 48, 'Arial');
  * console.log(`Width: ${metrics.width}px, Height: ${metrics.height}px`);
  */
-async function measureTextAccurate(text, fontSize = 48, fontFamily = 'Arial', { features = null } = {}) {
+async function measureTextAccurate(text, fontSize = 48, fontFamily = 'Arial', { features = null, measureText = null } = {}) {
   const font = await initializeFont();
+
+  if (measureText) {
+    // The caller measures with the renderer that will draw the text (e.g. rasterize-wasm).
+    const width = await measureText(text, fontSize, { features: features || [] });
+    if (!Number.isFinite(width)) {
+      throw new TypeError(`measureText returned ${width} for "${text}" at ${fontSize}`);
+    }
+    const fontScale = font ? fontSize / font.unitsPerEm : 0;
+    const ascent = font ? font.ascender * fontScale : fontSize * 0.8;
+    const descent = font ? Math.abs(font.descender * fontScale) : fontSize * 0.2;
+    return { width, height: ascent + descent, actualBoundingBoxAscent: ascent, actualBoundingBoxDescent: descent, isAccurate: true };
+  }
   const classification = classifyText(text);
   const requiresSpecialFont = classification.hasCJK;
   const hasEmojis = classification.hasEmoji;
@@ -565,7 +579,11 @@ async function createEnsV2SVGImage(options) {
     fontBase64 = null,
     customElements = null,
     fitMode = 'natural',
+    measureText = null,
   } = options;
+  if (measureText !== null && typeof measureText !== 'function') {
+    throw new TypeError('ens-v2 measureText must be a function');
+  }
   if (!(width > 0) || !(height > 0)) {
     throw new RangeError(`ens-v2 needs a positive width and height, got ${width} × ${height}`);
   }
@@ -585,7 +603,7 @@ async function createEnsV2SVGImage(options) {
   }
 
   // No height cap: Satoshi's line box (1.25 em) would keep names well below the design size.
-  const { fontSize, metrics } = await calculateFontSize(measuredText, textAreaWidth, null, FONT_SIZE.DEFAULT_MIN, maxFontSize, fontFamily, { features: L.TEXT_FEATURES });
+  const { fontSize, metrics } = await calculateFontSize(measuredText, textAreaWidth, null, FONT_SIZE.DEFAULT_MIN, maxFontSize, fontFamily, { features: L.TEXT_FEATURES, measureText });
   const labelWidth = round3(2 * L.LABEL_PADDING_X + metrics.width);
   const labelRight = round3(L.LABEL_X + labelWidth);
 
@@ -616,8 +634,13 @@ async function createEnsV2SVGImage(options) {
     <defs>
       ${textStyleDefs(fontFamily, fontBase64)}
       <style>
-        /* Chrome's default autospace adds ~1/8 em between CJK and Latin; the label is measured without it. */
-        text { text-autospace: no-autospace; }
+        /* Turn tnum on here too: rasterize-wasm only reads font-feature-settings. Chrome's default
+           autospace adds ~1/8 em between CJK and Latin; the label is measured without it. */
+        text {
+          font-feature-settings: "ss01" on, "ss03" on, "tnum" on;
+          -moz-font-feature-settings: "ss01" on, "ss03" on, "tnum" on;
+          text-autospace: no-autospace;
+        }
       </style>
     </defs>
   </svg>`;
@@ -647,6 +670,8 @@ async function createEnsV2SVGImage(options) {
  * @param {'natural'|'exact'} [options.fitMode='natural'] - `'natural'` lets the renderer shape the text at its own width (fastest). `'exact'` emits `textLength`+`lengthAdjust="spacingAndGlyphs"` so the renderer compresses or stretches glyphs to match the width the library measured — use this when the rasterizer's fonts differ from the library's measurement assumptions (e.g. server-side resvg with different fonts).
  * @param {'ens-v2'} [options.layout] - `'ens-v2'` renders the ENS v2 card (logo tile, name label, accent square). Omit for the layouts above. In this layout `width`/`height` default to 550, `maxFontSize` (default 60) is in 550-unit design space, `backgroundImageUrl` must be a `data:` URI, `backgroundColor` defaults to `'#F6FBFD'`, and `textColor`, `autoFontSize`, `fontSize`, `textX`/`textY`, `maxTextWidth` and `ensStyle` are ignored.
  * @param {string|null} [options.backgroundMarkup=null] - ens-v2 only: trusted SVG fragment covering width × height, inserted verbatim as the background when there is no avatar
+ * @param {Function} [options.measureText] - ens-v2 only: `(text, fontSize, { features }) => width` (sync or async) used to measure the name,
+ *   e.g. `(t, s, o) => renderer.measureText(t, s, { ...o, primaryFont: satoshi })` with rasterize-wasm. Gets the unescaped text.
  * @param {{label?: string, accent?: string, logo?: string}} [options.colors] - ens-v2 only: label `'#F6FBFD'`, accent `'#0082BB'` (logo tile, name, accent square), logo `'#F6FBFD'`
  * @returns {Promise<Uint8Array>} SVG data as UTF-8 encoded byte array
  * @example

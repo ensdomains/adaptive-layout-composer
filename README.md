@@ -97,11 +97,32 @@ const svgData = await createDynamicSVGImage({
 | `colors.accent` | `'#0082BB'` | Logo tile, name and accent square. |
 | `colors.logo` | `'#F6FBFD'` | ENS logo. |
 | `maxFontSize` | `60` | In design units. 60 puts Satoshi Bold's ascenders 44.8 units above the baseline, as in the design. |
-| `fontFamily`, `fontBase64`, `customElements`, `fitMode` | as above | `customElements` paint on top of the card. |
+| `measureText` | – | `(text, fontSize, { features }) => width`, sync or async. Measures the name instead of the built-in measurement. Pass the renderer's own measurement to get an exact label (see below). Gets the unescaped text. |
+| `fontFamily`, `fontBase64`, `customElements`, `fitMode` | as above | `customElements` paint on top of the card. `fitMode: 'exact'` has no effect in rasterize-wasm, which ignores `textLength`. |
 
 The name shrinks to fit the widest label that keeps the accent square 12 units from the right edge (398 units of text on a square card; wider cards allow more). International and CJK names get 85% of that width. As in the ENS style layout, the name never goes below 12 units: a name that doesn't fit at that size (about 55+ characters on a square card) runs past the right edge.
 
-How the label is measured:
+#### Exact labels with rasterize-wasm
+
+[rasterize-wasm](https://github.com/ensdomains/rasterize-wasm) draws the text itself: it picks a bundled Noto font per script, shapes with HarfBuzz and uses Twemoji for emoji. Its `measureText` runs that same layout without drawing, so passing it here makes the label fit every script exactly in the rasterized card:
+
+```javascript
+import { UniversalSVGRenderer } from 'rasterize-wasm';
+
+const renderer = new UniversalSVGRenderer();
+const svg = await createDynamicSVGImage({
+  layout: 'ens-v2',
+  text: 'مرحبا.eth',
+  fontFamily: 'Satoshi',
+  fontBase64: satoshiBase64,
+  measureText: (text, fontSize, options) => renderer.measureText(text, fontSize, { ...options, primaryFont: satoshiBytes }),
+});
+const png = await renderer.render(new TextDecoder().decode(svg));
+```
+
+`primaryFont` must be the same font as `fontBase64`: rasterize-wasm draws with the embedded font.
+
+Without `measureText`, the label is measured as follows:
 
 - With the font loaded through `initializeFont`, the label fits the glyphs the text style turns on (`ss01`, `ss03`, tabular digits), with kerning and without ligatures. Browsers render exactly that. Renderers that ignore font features (resvg 2.6, for example) draw some names narrower, which leaves extra space on the right of the label.
 - Each character is measured on its own. Characters the font has use its glyphs. CJK characters (ideographs, kana, Hangul, full-width forms) count as 1 em, which is how CJK fonts draw them; half-width forms count as 0.5 em. Greek, Cyrillic, Hebrew, Arabic, Indic, Thai and Georgian use an average width per character measured with the Noto Sans Bold fonts, and emoji count as 1.15 em. The viewer's fonts draw these scripts, so on other platforms the label can be off by around 10%. Some Korean fonts draw Hangul slightly narrower than 1 em.
