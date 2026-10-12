@@ -36,16 +36,16 @@ test('tanrikulu.eth at 550: tile, logo, label, name and accent square in place',
   const p = parse(svg);
   const { fontSize, metrics } = await expectedSize('tanrikulu.eth', 398);
 
-  assert.ok(svg.includes('<rect x="12" y="478" width="60" height="60" rx="6" fill="#0082BB"/>'));
-  assert.match(svg, new RegExp(`<path fill-rule="evenodd" clip-rule="evenodd" d="${LOGO_START}[^"]+" fill="#F6FBFD"/>`));
+  assert.ok(svg.includes('<rect x="12" y="478" width="60" height="60" rx="6" fill="#F6FBFD"/>'));
+  assert.match(svg, new RegExp(`<path fill-rule="evenodd" clip-rule="evenodd" d="${LOGO_START}[^"]+" fill="#0082BB"/>`));
   assert.equal(p.text, 'tanrikulu.eth');
   assert.equal(p.fontSize, fontSize);
   assert.equal(p.fontSize, 60, 'short names render at the calibrated maximum');
-  assert.equal(p.textFill, '#0082BB');
-  assert.equal(p.labelFill, '#F6FBFD');
+  assert.equal(p.textFill, '#F6FBFD');
+  assert.equal(p.labelFill, '#0082BB');
   assert.equal(p.labelWidth, round3(34 + metrics.width));
   assert.equal(p.accentX, round3(74 + p.labelWidth));
-  assert.equal(p.accentFill, '#0082BB');
+  assert.equal(p.accentFill, '#F6FBFD');
   assert.equal(p.translateY, 0);
   assert.equal(p.scale, 1);
   assert.ok(!/<text[^>]*filter=/.test(svg), 'name has no filter');
@@ -123,7 +123,7 @@ test('colors option overrides label, accent and logo', async () => {
   assert.match(svg, /d="M42\.7634[^"]+" fill="#333333"/);
   // partial override keeps the other defaults
   const q = parse(await v2({ text: 'a.eth', colors: { accent: '#222222' } }));
-  assert.equal(q.labelFill, '#F6FBFD');
+  assert.equal(q.labelFill, '#0082BB');
 });
 
 test('1000 × 1000: scaled group, same design-space label limit', async () => {
