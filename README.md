@@ -104,7 +104,8 @@ The name shrinks to fit the widest label that keeps the accent square 12 units f
 How the label is measured:
 
 - With the font loaded through `initializeFont`, the label fits the glyphs the text style turns on (`ss01`, `ss03`, tabular digits), with kerning and without ligatures. Browsers render exactly that. Renderers that ignore font features (resvg 2.6, for example) draw some names narrower, which leaves extra space on the right of the label.
-- Each character is measured on its own. Characters the font has use its glyphs. CJK characters (ideographs, kana, Hangul, full-width forms) count as 1 em, which is how CJK fonts draw them; half-width forms count as 0.5 em. Only other characters the font lacks (emoji, Arabic and so on) are estimated, so names containing them get an approximate label width. Some Korean fonts draw Hangul slightly narrower than 1 em.
+- Each character is measured on its own. Characters the font has use its glyphs. CJK characters (ideographs, kana, Hangul, full-width forms) count as 1 em, which is how CJK fonts draw them; half-width forms count as 0.5 em. Greek, Cyrillic, Hebrew, Arabic, Indic, Thai and Georgian use an average width per character measured with the Noto Sans Bold fonts, and emoji count as 1.15 em. The viewer's fonts draw these scripts, so on other platforms the label can be off by around 10%. Some Korean fonts draw Hangul slightly narrower than 1 em.
+- The layout sets `text-autospace: no-autospace`, so Chrome doesn't add its extra space between CJK and Latin characters, which the measurement doesn't include.
 - `text` is inserted as given, so escape it yourself. Measurement decodes XML entities first: `a&amp;b.eth` is measured as `a&b.eth`.
 
 A `width` or `height` that isn't a positive number throws a `RangeError`.

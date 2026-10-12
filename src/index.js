@@ -243,9 +243,31 @@ const FULL_WIDTH_RANGES = [
 ];
 const HALF_WIDTH_RANGE = [0xFF61, 0xFFDC]; // Half-width Katakana and Hangul
 
-function eastAsianWidthEm(codePoint) {
-  if (FULL_WIDTH_RANGES.some(([lo, hi]) => codePoint >= lo && codePoint <= hi)) return 1;
+// Average width per grapheme of scripts Satoshi lacks, measured on common words in the Noto Sans
+// Bold fonts (shaped with HarfBuzz, so Arabic joining and Indic conjuncts are included). Other
+// platforms' fonts differ by roughly ±10%.
+const SCRIPT_WIDTHS_EM = [
+  [[[0x0370, 0x03FF], [0x1F00, 0x1FFF]], 0.61],                   // Greek
+  [[[0x0400, 0x052F], [0x1C80, 0x1C8F]], 0.61],                   // Cyrillic
+  [[[0x0590, 0x05FF], [0xFB1D, 0xFB4F]], 0.56],                   // Hebrew
+  [[[0x0600, 0x06FF], [0x0750, 0x077F], [0x08A0, 0x08FF], [0xFB50, 0xFDFF], [0xFE70, 0xFEFF]], 0.53], // Arabic
+  [[[0x0900, 0x0DFF]], 0.73],                                     // Devanagari, Bengali and the other Indic scripts
+  [[[0x0E00, 0x0EFF]], 0.56],                                     // Thai, Lao
+  [[[0x10A0, 0x10FF], [0x1C90, 0x1CBF], [0x2D00, 0x2D2F]], 0.68], // Georgian (Noto 0.72; macOS draws it narrower)
+];
+const EMOJI_WIDTH_EM = 1.15;
+
+const inRanges = (codePoint, ranges) => ranges.some(([lo, hi]) => codePoint >= lo && codePoint <= hi);
+
+// Width in em of a grapheme the font lacks, or null when its script isn't listed.
+function scriptWidthEm(grapheme) {
+  const codePoint = grapheme.codePointAt(0);
+  if (inRanges(codePoint, FULL_WIDTH_RANGES)) return 1;
   if (codePoint >= HALF_WIDTH_RANGE[0] && codePoint <= HALF_WIDTH_RANGE[1]) return 0.5;
+  for (const [ranges, em] of SCRIPT_WIDTHS_EM) {
+    if (inRanges(codePoint, ranges)) return em;
+  }
+  if (classifyText(grapheme).hasEmoji || /\p{Extended_Pictographic}/u.test(grapheme)) return EMOJI_WIDTH_EM;
   return null;
 }
 
@@ -262,7 +284,8 @@ function graphemes(text) {
  * - characters the font has: its glyphs with the given features on, ligatures off
  *   (font-variant-ligatures: none) and GPOS kerning between neighbours;
  * - East Asian full-width / half-width characters: 1 em / 0.5 em, as CJK fallback fonts draw them;
- * - anything else (emoji, scripts the font lacks): the per-character estimate.
+ * - other scripts and emoji: a measured average width per grapheme (SCRIPT_WIDTHS_EM, EMOJI_WIDTH_EM);
+ * - anything else: the per-character estimate.
  */
 function measureWithFeatures(font, text, fontSize, fontFamily, features) {
   const substitutions = singleSubstitutions(font, features);
@@ -287,9 +310,10 @@ function measureWithFeatures(font, text, fontSize, fontFamily, features) {
       continue;
     }
     previous = null;
-    const em = eastAsianWidthEm(grapheme.codePointAt(0));
+    const em = scriptWidthEm(grapheme);
     if (em !== null) {
       otherWidth += em * fontSize;
+      if (em !== 1 && em !== 0.5) estimated = true;
     } else {
       otherWidth += measureTextFallback(grapheme, fontSize, fontFamily || 'Satoshi').width;
       estimated = true;
@@ -591,6 +615,10 @@ async function createEnsV2SVGImage(options) {
     ${joinCustomElements(customElements)}
     <defs>
       ${textStyleDefs(fontFamily, fontBase64)}
+      <style>
+        /* Chrome's default autospace adds ~1/8 em between CJK and Latin; the label is measured without it. */
+        text { text-autospace: no-autospace; }
+      </style>
     </defs>
   </svg>`;
   return new TextEncoder().encode(svg);

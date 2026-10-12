@@ -251,3 +251,26 @@ test('emoji names: Latin part exact, emoji estimated, label inside the limit', a
   const p = parse(await v2({ text: '👨‍👩‍👧‍👦🚀rocket.eth' }));
   assert.ok(Number.isFinite(p.labelWidth) && p.accentX <= 506);
 });
+
+test('other scripts use their measured per-grapheme widths, independent of fontFamily', async () => {
+  const cases = [
+    ['שלום.eth', 4, 0.56],      // Hebrew
+    ['مرحبا.eth', 5, 0.53],     // Arabic
+    ['γεια.eth', 4, 0.61],      // Greek
+    ['привет.eth', 6, 0.61],    // Cyrillic
+    ['გამარჯობა.eth', 9, 0.68], // Georgian
+    ['สวัสดี.eth', 4, 0.56],     // Thai (4 graphemes)
+  ];
+  for (const fontFamily of ['Satoshi', 'sans-serif']) {
+    for (const [text, graphemes, em] of cases) {
+      const p = parse(await v2({ text, fontFamily }));
+      const expected = 34 + graphemes * em * p.fontSize + browserAdvance('.eth', p.fontSize);
+      assert.ok(Math.abs(p.labelWidth - expected) < 0.01, `${text} (${fontFamily}): label ${p.labelWidth}, expected ${expected}`);
+    }
+  }
+});
+
+test('Chrome autospace between CJK and Latin is turned off, matching the measurement', async () => {
+  const svg = await v2({ text: '音乐lover.eth' });
+  assert.match(svg, /text \{ text-autospace: no-autospace; \}/);
+});
