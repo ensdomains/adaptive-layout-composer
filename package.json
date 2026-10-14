@@ -5,10 +5,12 @@
   "main": "src/index.js",
   "type": "module",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./assets/*": "./assets/*"
   },
   "files": [
-    "src/"
+    "src/",
+    "assets/"
   ],
   "keywords": [
     "svg",

@@ -86,6 +86,14 @@ const svgData = await createDynamicSVGImage({
 });
 ```
 
+The package ships Satoshi Bold at `adaptive-layout-composer/assets/Satoshi-Bold.ttf`. In a Cloudflare Worker, import it as data (add a `Data` rule for `**/*.ttf` to `wrangler.toml`) and use the same bytes for `fontBase64` and for rasterize-wasm's `primaryFont`:
+
+```javascript
+import satoshiBytes from 'adaptive-layout-composer/assets/Satoshi-Bold.ttf';
+
+const satoshiBase64 = btoa(String.fromCharCode(...new Uint8Array(satoshiBytes)));
+```
+
 | Option | Default | Notes |
 |---|---|---|
 | `layout` | – | `'ens-v2'` selects this layout. Without it, the existing layouts are unchanged. |
