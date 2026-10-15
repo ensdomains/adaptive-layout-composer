@@ -91,6 +91,10 @@ export const demoHTML = `<!DOCTYPE html>
             gap: 15px;
         }
 
+        .controls.v2 .classic-only {
+            display: none !important;
+        }
+
         .color-input {
             display: flex;
             align-items: center;
@@ -119,6 +123,7 @@ export const demoHTML = `<!DOCTYPE html>
 
         .button-group {
             display: flex;
+            flex-wrap: wrap;
             gap: 10px;
             margin-top: 10px;
         }
@@ -299,6 +304,41 @@ export const demoHTML = `<!DOCTYPE html>
                     </div>
                 </div>
 
+                <div class="form-group">
+                    <label for="layout">Layout</label>
+                    <select id="layout">
+                        <option value="ensStyle">ENS style (current)</option>
+                        <option value="ens-v2">ENS v2</option>
+                    </select>
+                </div>
+
+                <div id="v2Controls" style="display: none;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="labelColor">Label</label>
+                            <input type="color" id="labelColor" class="color-picker" value="#F6FBFD">
+                        </div>
+                        <div class="form-group">
+                            <label for="accentColor">Accent</label>
+                            <input type="color" id="accentColor" class="color-picker" value="#0082BB">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="logoColor">Logo</label>
+                            <input type="color" id="logoColor" class="color-picker" value="#F6FBFD">
+                        </div>
+                        <div class="form-group">
+                            <label for="v2BackgroundColor">Background (no image)</label>
+                            <input type="color" id="v2BackgroundColor" class="color-picker" value="#F6FBFD">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="backgroundMarkup">Background Markup (optional, SVG fragment)</label>
+                        <textarea id="backgroundMarkup" placeholder="<g>...</g> — used when there is no background image"></textarea>
+                    </div>
+                </div>
+
                 <div class="form-row">
                     <div class="form-group">
                         <label for="width">Width (px)</label>
@@ -319,7 +359,7 @@ export const demoHTML = `<!DOCTYPE html>
                     </div>
                 </div>
 
-                <div class="form-row">
+                <div class="form-row classic-only">
                     <div class="form-group">
                         <label>Text Color</label>
                         <div class="color-input">
@@ -337,7 +377,7 @@ export const demoHTML = `<!DOCTYPE html>
                     </div>
                 </div>
 
-                <div class="form-row" id="gradientControls">
+                <div class="form-row classic-only" id="gradientControls">
                     <div class="form-group">
                         <label>Gradient Start</label>
                         <div class="color-input">
@@ -354,7 +394,7 @@ export const demoHTML = `<!DOCTYPE html>
                     </div>
                 </div>
 
-                <div class="form-row">
+                <div class="form-row classic-only">
                     <div class="form-group">
                         <label for="maxTextWidth">Max Text Width (px)</label>
                         <input type="number" id="maxTextWidth" placeholder="Auto (80% of width)">
@@ -365,7 +405,7 @@ export const demoHTML = `<!DOCTYPE html>
                     </div>
                 </div>
 
-                <div class="checkbox-group">
+                <div class="checkbox-group classic-only">
                     <input type="checkbox" id="autoFontSize" checked>
                     <label for="autoFontSize">Enable Auto Font Sizing</label>
                 </div>
@@ -374,6 +414,7 @@ export const demoHTML = `<!DOCTYPE html>
                     <button class="btn btn-primary" onclick="generateImage()">🎨 Generate Image</button>
                     <button class="btn btn-secondary" onclick="downloadImage()">💾 Download</button>
                     <button class="btn btn-random" onclick="randomize()">🎲 Randomize All</button>
+                    <button class="btn btn-secondary" onclick="resetDefaults()">↺ Reset to Defaults</button>
                 </div>
             </div>
 
@@ -433,6 +474,12 @@ export const demoHTML = `<!DOCTYPE html>
             }
         });
 
+        document.getElementById('layout').addEventListener('change', function() {
+            const isV2 = this.value === 'ens-v2';
+            document.querySelector('.controls').classList.toggle('v2', isV2);
+            document.getElementById('v2Controls').style.display = isV2 ? 'block' : 'none';
+        });
+
         function hexToRgb(hex) {
             const result = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
             return result ? {
@@ -440,6 +487,22 @@ export const demoHTML = `<!DOCTYPE html>
                 g: parseInt(result[2], 16),
                 b: parseInt(result[3], 16)
             } : null;
+        }
+
+        // Put every control back to the value it has in the page markup, then redraw.
+        function resetDefaults() {
+            document.querySelectorAll('.controls input, .controls textarea, .controls select').forEach(el => {
+                if (el.type === 'checkbox') {
+                    el.checked = el.defaultChecked;
+                } else if (el.tagName === 'SELECT') {
+                    for (const option of el.options) option.selected = option.defaultSelected;
+                } else {
+                    el.value = el.defaultValue;
+                }
+            });
+            document.getElementById('gradientControls').style.display = '';
+            document.getElementById('layout').dispatchEvent(new Event('change'));
+            generateImage();
         }
 
         function setText(text) {
@@ -538,6 +601,17 @@ export const demoHTML = `<!DOCTYPE html>
                 ensStyle: true
             };
 
+            if (document.getElementById('layout').value === 'ens-v2') {
+                data.layout = 'ens-v2';
+                data.colors = {
+                    label: document.getElementById('labelColor').value,
+                    accent: document.getElementById('accentColor').value,
+                    logo: document.getElementById('logoColor').value
+                };
+                data.backgroundColor = document.getElementById('v2BackgroundColor').value;
+                data.backgroundMarkup = document.getElementById('backgroundMarkup').value || null;
+            }
+
             try {
                 const response = await fetch(WORKER_URL, {
                     method: 'POST',
@@ -560,6 +634,7 @@ export const demoHTML = `<!DOCTYPE html>
                         <div class="metrics">
                             <h4>📊 Image Metrics</h4>
                             <div><strong>Format:</strong> \${result.format.toUpperCase()}</div>
+                            <div><strong>Layout:</strong> \${data.layout === 'ens-v2' ? 'ENS v2' : 'ENS style'}</div>
                             <div><strong>Dimensions:</strong> \${data.width} × \${data.height}px</div>
                             <div><strong>Text:</strong> "\${data.text.substring(0, 50)}\${data.text.length > 50 ? '...' : ''}"</div>
                             <div><strong>Auto Font Size:</strong> \${data.autoFontSize ? 'Enabled' : 'Disabled'}</div>
