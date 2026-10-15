@@ -67,6 +67,78 @@ const svgData = await createDynamicSVGImage({
 });
 ```
 
+### ENS v2 Card Layout
+
+Pass `layout: 'ens-v2'` for the ENS v2 NFT card: the background (an avatar, your own SVG markup or a solid colour), an ENS logo tile bottom-left, and the name on a label with an accent square on its top-right corner.
+
+```javascript
+const svgData = await createDynamicSVGImage({
+  layout: 'ens-v2',
+  text: 'tanrikulu.eth',            // inserted as given: escape it yourself
+  width: 550,
+  height: 550,
+  fontFamily: 'Satoshi',
+  fontBase64: satoshiBase64,
+  backgroundImageUrl: 'data:image/png;base64,...', // avatar; must be a data: URI
+  // backgroundMarkup: '<g>...</g>', // used when there is no avatar
+  // backgroundColor: '#F6FBFD',     // used when there is neither
+  // colors: { label: '#F6FBFD', accent: '#0082BB', logo: '#F6FBFD' },
+});
+```
+
+The package ships Satoshi Bold at `adaptive-layout-composer/assets/Satoshi-Bold.ttf`. In a Cloudflare Worker, import it as data (add a `Data` rule for `**/*.ttf` to `wrangler.toml`) and use the same bytes for `fontBase64` and for rasterize-wasm's `primaryFont`:
+
+```javascript
+import satoshiBytes from 'adaptive-layout-composer/assets/Satoshi-Bold.ttf';
+
+const satoshiBase64 = btoa(String.fromCharCode(...new Uint8Array(satoshiBytes)));
+```
+
+| Option | Default | Notes |
+|---|---|---|
+| `layout` | – | `'ens-v2'` selects this layout. Without it, the existing layouts are unchanged. |
+| `width`, `height` | `550` | Any size. The card is drawn in a 550-unit design space, scaled by `min(width, height) / 550` and anchored bottom-left. The background fills the full canvas. |
+| `backgroundImageUrl` | `null` | Avatar. Only `data:` URIs are used (nothing is fetched). Emitted as `<image href="…" width="…" height="…" preserveAspectRatio="xMidYMid slice"/>`, with `&`, `"` and `<` in the URI escaped. |
+| `backgroundMarkup` | `null` | Trusted SVG fragment covering `width × height`, inserted verbatim when there is no avatar. |
+| `backgroundColor` | `'#F6FBFD'` | Solid background when there is neither. Accepts a CSS colour, `[r, g, b, a]`, or `'transparent'` for none. |
+| `colors.label` | `'#F6FBFD'` | Name label. |
+| `colors.accent` | `'#0082BB'` | Logo tile, name and accent square. |
+| `colors.logo` | `'#F6FBFD'` | ENS logo. |
+| `maxFontSize` | `60` | In design units. 60 puts Satoshi Bold's ascenders 44.8 units above the baseline, as in the design. |
+| `measureText` | – | `(text, fontSize, { features }) => width`, sync or async. Measures the name instead of the built-in measurement. Pass the renderer's own measurement to get an exact label (see below). Gets the unescaped text. |
+| `fontFamily`, `fontBase64`, `customElements`, `fitMode` | as above | `customElements` paint on top of the card. `fitMode: 'exact'` has no effect in rasterize-wasm, which ignores `textLength`. |
+
+The name shrinks to fit the widest label that keeps the accent square 12 units from the right edge (398 units of text on a square card; wider cards allow more). International and CJK names get 85% of that width. As in the ENS style layout, the name never goes below 12 units: a name that doesn't fit at that size (about 55+ characters on a square card) runs past the right edge.
+
+#### Exact labels with rasterize-wasm
+
+[rasterize-wasm](https://github.com/ensdomains/rasterize-wasm) draws the text itself: it picks a bundled Noto font per script, shapes with HarfBuzz and uses Twemoji for emoji. Its `measureText` runs that same layout without drawing, so passing it here makes the label fit every script exactly in the rasterized card:
+
+```javascript
+import { UniversalSVGRenderer } from 'rasterize-wasm';
+
+const renderer = new UniversalSVGRenderer();
+const svg = await createDynamicSVGImage({
+  layout: 'ens-v2',
+  text: 'مرحبا.eth',
+  fontFamily: 'Satoshi',
+  fontBase64: satoshiBase64,
+  measureText: (text, fontSize, options) => renderer.measureText(text, fontSize, { ...options, primaryFont: satoshiBytes }),
+});
+const png = await renderer.render(new TextDecoder().decode(svg));
+```
+
+`primaryFont` must be the same font as `fontBase64`: rasterize-wasm draws with the embedded font.
+
+Without `measureText`, the label is measured as follows:
+
+- With the font loaded through `initializeFont`, the label fits the glyphs the text style turns on (`ss01`, `ss03`, tabular digits), with kerning and without ligatures. Browsers render exactly that. Renderers that ignore font features (resvg 2.6, for example) draw some names narrower, which leaves extra space on the right of the label.
+- Each character is measured on its own. Characters the font has use its glyphs. CJK characters (ideographs, kana, Hangul, full-width forms) count as 1 em, which is how CJK fonts draw them; half-width forms count as 0.5 em. Greek, Cyrillic, Hebrew, Arabic, Indic, Thai and Georgian use an average width per character measured with the Noto Sans Bold fonts, and emoji count as 1.15 em. The viewer's fonts draw these scripts, so on other platforms the label can be off by around 10%. Some Korean fonts draw Hangul slightly narrower than 1 em.
+- The layout sets `text-autospace: no-autospace`, so Chrome doesn't add its extra space between CJK and Latin characters, which the measurement doesn't include.
+- `text` is inserted as given, so escape it yourself. Measurement decodes XML entities first: `a&amp;b.eth` is measured as `a&b.eth`.
+
+A `width` or `height` that isn't a positive number throws a `RangeError`.
+
 ### API Reference
 
 #### `createDynamicSVGImage(options)`
