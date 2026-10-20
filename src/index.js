@@ -35,15 +35,24 @@ const ENS_V2_LAYOUT = {
   DESIGN_SIZE: 550,                     // Design canvas edge; everything below is scaled by min(width, height) / 550
   MAX_FONT_SIZE: 60,                    // Satoshi Bold ascenders (744/1000 em) reach 44.8 units above the baseline
   LABEL_X: 74,
-  LABEL_Y: 420,
-  LABEL_HEIGHT: 88,
+  LABEL_BOTTOM: 508,                    // The label grows upward from here, one line at a time
+  LABEL_MIN_Y: 90,                      // Highest the label's top may reach
   LABEL_PADDING_X: 17,                  // Space between the label edge and the name, each side
-  TEXT_BASELINE_Y: 484,
+  LABEL_PADDING_Y: 12,
+  ASCENT: 52 / 64,                      // First baseline below the text's top, per unit of design size
   ACCENT_SIZE: 32,
-  ACCENT_Y: 388,
   RIGHT_MARGIN: 12,                     // Closest the accent square may get to the right edge
   CORNER_RADIUS: 6,
-  COLORS: { label: '#F6FBFD', accent: '#0082BB', logo: '#F6FBFD' },
+  // The design's text sizes, tried in order, with the distance between baselines; the
+  // smaller two may break a label mid-word. Satoshi is drawn at FONT_SCALE of them.
+  STEPS: [
+    { size: 64, pitch: 70, wrap: false },
+    { size: 48, pitch: 48, wrap: true },
+    { size: 28, pitch: 28, wrap: true },
+  ],
+  FONT_SCALE: 60 / 64,
+  SINGLE_LINE_MIN_SIZE: 40,             // A name this close to fitting shrinks on one line instead of breaking
+  COLORS: { label: '#F6FBFD', accent: '#0082BB', logo: '#F6FBFD', parent: '#80C4E0' },
   BACKGROUND_COLOR: '#F6FBFD',
   TEXT_FEATURES: ['ss01', 'ss03', 'tnum'], // What the shared text style turns on; the label is measured with the same glyphs
   LOGO_PATH: 'M42.7634 487.399C42.6074 487.163 42.8942 486.886 43.127 487.049L52.8702 493.832C59.011 498.107 61.8385 505.74 59.8916 512.934C59.7373 513.504 59.5719 514.003 59.4164 514.421C59.3201 514.68 58.937 514.624 58.9176 514.348C58.7534 512.006 57.0577 509.328 55.827 507.385C55.6073 507.038 55.4024 506.714 55.2237 506.42C54.0275 504.452 45.3683 491.34 42.7634 487.399ZM29.8625 506.477L41.5249 487.39C41.6603 487.169 41.4166 486.91 41.1853 487.03C39.1465 488.088 33.6454 491.147 29.3265 495.437C24.5934 500.138 28.4184 505.297 29.4451 506.509C29.5586 506.643 29.7711 506.627 29.8625 506.477ZM41.2366 528.601C41.3926 528.837 41.1058 529.113 40.873 528.951L31.1298 522.168C24.989 517.893 22.1615 510.26 24.1084 503.066C24.2627 502.496 24.4281 501.997 24.5836 501.579C24.6799 501.32 25.063 501.376 25.0824 501.652C25.2466 503.994 26.9423 506.672 28.173 508.615L28.1731 508.616L28.1733 508.616C28.3929 508.963 28.5977 509.286 28.7763 509.58C29.9725 511.548 38.6317 524.66 41.2366 528.601ZM42.4761 528.607L54.1384 509.521C54.2299 509.371 54.4424 509.355 54.5558 509.488C55.5825 510.701 59.4075 515.86 54.6745 520.561C50.3556 524.851 44.8544 527.91 42.8157 528.968C42.5844 529.087 42.3407 528.829 42.4761 528.607Z',
@@ -561,6 +570,81 @@ function escapeXmlAttribute(value) {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
+function escapeXmlText(value) {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// A subname's own labels each get a line ("second.", "wallet."); the 2LD and TLD share the last.
+function ensV2Segments(name) {
+  const labels = name.split('.');
+  if (labels.length <= 2) return [name];
+  return [...labels.slice(0, -2).map(label => `${label}.`), labels.slice(-2).join('.')];
+}
+
+// Greedy break into lines no wider than maxWidth, one grapheme at a time.
+async function breakSegment(segment, maxWidth, measure) {
+  const lines = [];
+  let line = '';
+  let lineWidth = 0;
+  for (const grapheme of graphemes(segment)) {
+    const width = (await measure(line + grapheme)).width;
+    if (line && width > maxWidth) {
+      lines.push({ text: line, width: lineWidth });
+      line = grapheme;
+      lineWidth = (await measure(grapheme)).width;
+    } else {
+      line += grapheme;
+      lineWidth = width;
+    }
+  }
+  if (line) lines.push({ text: line, width: lineWidth });
+  return lines;
+}
+
+const ensV2LabelHeight = (step, lineCount) => 2 * ENS_V2_LAYOUT.LABEL_PADDING_Y + step.size + (lineCount - 1) * step.pitch;
+
+/**
+ * The name's lines at the first design size that fits: every line within maxWidth
+ * and the label within maxHeight. At the first step each label stays on one line
+ * and shrinks, down to SINGLE_LINE_MIN_SIZE, before any label is broken mid-word;
+ * past the smallest step the size keeps shrinking until the label fits.
+ */
+async function layoutEnsV2Name(name, maxWidth, maxHeight, maxFontSize, measureAt) {
+  const L = ENS_V2_LAYOUT;
+  const segments = ensV2Segments(name);
+  const scaled = size => Math.min(round3(size * L.FONT_SCALE), maxFontSize);
+  const fitsHeight = (step, lineCount) => ensV2LabelHeight(step, lineCount) <= maxHeight;
+
+  const [first, ...rest] = L.STEPS;
+  if (fitsHeight(first, segments.length)) {
+    for (let fontSize = scaled(first.size); fontSize >= scaled(L.SINGLE_LINE_MIN_SIZE); fontSize = round3(fontSize - 1)) {
+      const widths = await Promise.all(segments.map(async text => (await measureAt(text, fontSize)).width));
+      if (widths.every(width => width <= maxWidth)) {
+        return { step: first, fontSize, lines: segments.map((text, segment) => ({ text, width: widths[segment], segment })) };
+      }
+    }
+  }
+
+  const steps = [...rest];
+  for (let size = rest[rest.length - 1].size - 2; size * L.FONT_SCALE >= FONT_SIZE.DEFAULT_MIN; size -= 2) {
+    steps.push({ size, pitch: size, wrap: true });
+  }
+  let layout;
+  for (const step of steps) {
+    const fontSize = scaled(step.size);
+    const measure = text => measureAt(text, fontSize);
+    const lines = [];
+    for (const [segment, text] of segments.entries()) {
+      const { width } = await measure(text);
+      if (width <= maxWidth) lines.push({ text, width, segment });
+      else for (const line of await breakSegment(text, maxWidth, measure)) lines.push({ ...line, segment });
+    }
+    layout = { step, fontSize, lines };
+    if (fitsHeight(step, lines.length)) return layout;
+  }
+  return layout;
+}
+
 /**
  * ENS v2 card: background (avatar, caller markup or solid colour), logo tile,
  * name label with accent square. See createDynamicSVGImage for the options.
@@ -602,10 +686,14 @@ async function createEnsV2SVGImage(options) {
     textAreaWidth *= ENS_LAYOUT.CJK_WIDTH_FACTOR;
   }
 
-  // No height cap: Satoshi's line box (1.25 em) would keep names well below the design size.
-  const { fontSize, metrics } = await calculateFontSize(measuredText, textAreaWidth, null, FONT_SIZE.DEFAULT_MIN, maxFontSize, fontFamily, { features: L.TEXT_FEATURES, measureText });
-  const labelWidth = round3(2 * L.LABEL_PADDING_X + metrics.width);
+  const safeWidth = textAreaWidth * (1 - getTextMeasurementStrategy(measuredText).recommendedSafetyMargin);
+  const measureAt = (t, size) => measureTextAccurate(t, size, fontFamily, { features: L.TEXT_FEATURES, measureText });
+  const { step, fontSize, lines } = await layoutEnsV2Name(measuredText, safeWidth, L.LABEL_BOTTOM - L.LABEL_MIN_Y, maxFontSize, measureAt);
+  const labelHeight = ensV2LabelHeight(step, lines.length);
+  const labelY = L.LABEL_BOTTOM - labelHeight;
+  const labelWidth = round3(2 * L.LABEL_PADDING_X + Math.max(...lines.map(line => line.width)));
   const labelRight = round3(L.LABEL_X + labelWidth);
+  const firstBaseline = round3(labelY + L.LABEL_PADDING_Y + L.ASCENT * step.size);
 
   let backgroundElement = '';
   const solidFill = resolveColor(backgroundColor);
@@ -617,18 +705,23 @@ async function createEnsV2SVGImage(options) {
     backgroundElement = `<rect width="${width}" height="${height}" fill="${solidFill}"/>`;
   }
 
-  const fitAttrs = fitMode === 'exact' && metrics?.width
-    ? ` textLength="${metrics.width.toFixed(2)}" lengthAdjust="spacingAndGlyphs"`
-    : '';
+  const textElements = lines.map((line, i) => {
+    const fitAttrs = fitMode === 'exact' && line.width
+      ? ` textLength="${line.width.toFixed(2)}" lengthAdjust="spacingAndGlyphs"`
+      : '';
+    const fill = line.segment === 0 ? colors.accent : colors.parent;
+    const y = round3(firstBaseline + i * step.pitch);
+    return `<text x="${L.LABEL_X + L.LABEL_PADDING_X}" y="${y}" font-size="${fontSize}px" fill="${fill}"${fitAttrs}>${escapeXmlText(line.text)}</text>`;
+  }).join('\n      ');
 
   const svg = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" fill="none" xmlns="http://www.w3.org/2000/svg">
     ${backgroundElement}
     <g transform="translate(0 ${height - L.DESIGN_SIZE * k}) scale(${k})">
       <rect x="12" y="478" width="60" height="60" rx="${L.CORNER_RADIUS}" fill="${colors.accent}"/>
       <path fill-rule="evenodd" clip-rule="evenodd" d="${L.LOGO_PATH}" fill="${colors.logo}"/>
-      <rect x="${L.LABEL_X}" y="${L.LABEL_Y}" width="${labelWidth}" height="${L.LABEL_HEIGHT}" rx="${L.CORNER_RADIUS}" fill="${colors.label}"/>
-      <text x="${L.LABEL_X + L.LABEL_PADDING_X}" y="${L.TEXT_BASELINE_Y}" font-size="${fontSize}px" fill="${colors.accent}"${fitAttrs}>${text}</text>
-      <rect x="${labelRight}" y="${L.ACCENT_Y}" width="${L.ACCENT_SIZE}" height="${L.ACCENT_SIZE}" rx="${L.CORNER_RADIUS}" fill="${colors.accent}"/>
+      <rect x="${L.LABEL_X}" y="${labelY}" width="${labelWidth}" height="${labelHeight}" rx="${L.CORNER_RADIUS}" fill="${colors.label}"/>
+      ${textElements}
+      <rect x="${labelRight}" y="${labelY - L.ACCENT_SIZE}" width="${L.ACCENT_SIZE}" height="${L.ACCENT_SIZE}" rx="${L.CORNER_RADIUS}" fill="${colors.accent}"/>
     </g>
     ${joinCustomElements(customElements)}
     <defs>
@@ -672,7 +765,7 @@ async function createEnsV2SVGImage(options) {
  * @param {string|null} [options.backgroundMarkup=null] - ens-v2 only: trusted SVG fragment covering width × height, inserted verbatim as the background when there is no avatar
  * @param {Function} [options.measureText] - ens-v2 only: `(text, fontSize, { features }) => width` (sync or async) used to measure the name,
  *   e.g. `(t, s, o) => renderer.measureText(t, s, { ...o, primaryFont: satoshi })` with rasterize-wasm. Gets the unescaped text.
- * @param {{label?: string, accent?: string, logo?: string}} [options.colors] - ens-v2 only: label `'#F6FBFD'`, accent `'#0082BB'` (logo tile, name, accent square), logo `'#F6FBFD'`
+ * @param {{label?: string, accent?: string, logo?: string, parent?: string}} [options.colors] - ens-v2 only: label `'#F6FBFD'`, accent `'#0082BB'` (logo tile, name, accent square), logo `'#F6FBFD'`, parent `'#80C4E0'` (a subname's parent labels)
  * @returns {Promise<Uint8Array>} SVG data as UTF-8 encoded byte array
  * @example
  * // Generate with default ENS style

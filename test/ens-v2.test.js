@@ -39,16 +39,25 @@ async function v2(opts) {
 const expectedSize = (text, textAreaWidth) => calculateFontSize(text, textAreaWidth, null, 12, 60, undefined, { features: FEATURES });
 
 function parse(svg) {
-  const label = svg.match(/<rect x="74" y="420" width="([\d.]+)" height="88" rx="6" fill="([^"]+)"\/>/);
-  const accent = svg.match(/<rect x="([\d.]+)" y="388" width="32" height="32" rx="6" fill="([^"]+)"\/>/);
-  const text = svg.match(/<text x="91" y="484" font-size="(\d+)px" fill="([^"]+)"[^>]*>([^<]*)<\/text>/);
+  const label = svg.match(/<rect x="74" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="6" fill="([^"]+)"\/>/);
+  const accent = svg.match(/<rect x="([\d.]+)" y="([\d.-]+)" width="32" height="32" rx="6" fill="([^"]+)"\/>/);
+  const lines = [...svg.matchAll(/<text x="91" y="([\d.]+)" font-size="([\d.]+)px" fill="([^"]+)"[^>]*>([^<]*)<\/text>/g)]
+    .map(m => ({ y: Number(m[1]), fontSize: Number(m[2]), fill: m[3], text: m[4] }));
   const group = svg.match(/<g transform="translate\(0 ([\d.e-]+)\) scale\(([\d.]+)\)">/);
   return {
-    labelWidth: label && Number(label[1]), labelFill: label?.[2],
-    accentX: accent && Number(accent[1]), accentFill: accent?.[2],
-    fontSize: text && Number(text[1]), textFill: text?.[2], text: text?.[3],
+    labelY: label && Number(label[1]), labelWidth: label && Number(label[2]), labelHeight: label && Number(label[3]), labelFill: label?.[4],
+    accentX: accent && Number(accent[1]), accentY: accent && Number(accent[2]), accentFill: accent?.[3],
+    lines, fontSize: lines[0]?.fontSize, textFill: lines[0]?.fill, text: lines.map(l => l.text).join(''),
     translateY: group && Number(group[1]), scale: group && Number(group[2]),
   };
+}
+
+// The label grows upward from y=508, with the accent square on its top-right corner.
+function assertLabelGeometry(p, text) {
+  assert.equal(round3(p.labelY + p.labelHeight), 508, `${text}: label bottom`);
+  assert.equal(p.accentY, round3(p.labelY - 32), `${text}: accent on the label's top edge`);
+  assert.equal(p.accentX, round3(74 + p.labelWidth), `${text}: accent on the label's right edge`);
+  assert.ok(p.labelY >= 90, `${text}: label top ${p.labelY}`);
 }
 
 test('tanrikulu.eth at 550: tile, logo, label, name and accent square in place', async () => {
@@ -72,23 +81,72 @@ test('tanrikulu.eth at 550: tile, logo, label, name and accent square in place',
   assert.ok(!svg.includes('dropShadow'));
 });
 
-test('long name shrinks to calculateFontSize result and label stays inside 550 - 12 - 32', async () => {
-  const text = 'averyveryverylongensnamethatneedsshrinking.eth';
+test('a name a little too wide shrinks on one line, down to 37.5', async () => {
+  const text = 'alabamaala.eth';
   const p = parse(await v2({ text }));
-  const { fontSize } = await expectedSize(text, 398);
+  const { fontSize } = await calculateFontSize(text, 398, null, 37.5, 60, undefined, { features: FEATURES });
+  assert.equal(p.lines.length, 1);
   assert.equal(p.fontSize, fontSize);
-  assert.ok(p.fontSize < 60);
+  assert.ok(p.fontSize < 60 && p.fontSize >= 37.5);
+  assert.equal(p.labelHeight, 88);
+  assertLabelGeometry(p, text);
+});
+
+test('a long name breaks mid-word onto lines at 45 and the label grows upward', async () => {
+  const text = 'thisisalongcharacternamethatkeeps.eth';
+  const p = parse(await v2({ text }));
+  assert.equal(p.lines.length, 3);
+  assert.ok(p.lines.every(l => l.fontSize === 45 && l.fill === '#0082BB'));
+  assert.equal(p.text, text, 'the lines are the name, in order');
+  assert.deepEqual(p.lines.map(l => l.y), [p.lines[0].y, p.lines[0].y + 48, p.lines[0].y + 96]);
+  assert.equal(p.labelHeight, 168, "the design's 3-line label");
   assert.ok(p.accentX <= 550 - 12 - 32, `label right edge ${p.accentX}`);
+  assertLabelGeometry(p, text);
+});
+
+test('a 255-character name drops to 26.25 and stays below the top limit', async () => {
+  const label = ('thisisa255characternamethatkeepsgoing' + 'andgoing'.repeat(30)).slice(0, 252) + 'ggg';
+  const text = `${label}.eth`;
+  const p = parse(await v2({ text }));
+  assert.equal(p.fontSize, 26.25);
+  assert.equal(p.text, text);
+  assert.equal(p.labelHeight, 24 + 28 + (p.lines.length - 1) * 28);
+  assert.ok(p.accentX <= 506);
+  assertLabelGeometry(p, text);
+});
+
+test('names too tall even at the smallest step keep shrinking until the label fits', async () => {
+  const label = ('thisisa255characternamethatkeepsgoing' + 'andgoing'.repeat(30)).slice(0, 252) + 'ggg';
+  const text = `${label}.${label}.${label}.eth`;
+  const p = parse(await v2({ text }));
+  assert.ok(p.fontSize < 26.25 && p.fontSize >= 12, `font ${p.fontSize}`);
+  assert.equal(p.text, text);
+  assertLabelGeometry(p, text);
+});
+
+test("subnames: one label per line, the subname's own labels first, its parents lighter", async () => {
+  const p = parse(await v2({ text: 'second.wallet.jeff.eth' }));
+  assert.deepEqual(p.lines.map(l => l.text), ['second.', 'wallet.', 'jeff.eth']);
+  assert.deepEqual(p.lines.map(l => l.fill), ['#0082BB', '#80C4E0', '#80C4E0']);
+  assert.ok(p.lines.every(l => l.fontSize === 60));
+  assert.equal(p.labelHeight, 228, "the design's 3-line label");
+  assertLabelGeometry(p, 'second.wallet.jeff.eth');
+
+  const two = parse(await v2({ text: 'wallet.jeff.eth', colors: { parent: '#123456' } }));
+  assert.deepEqual(two.lines.map(l => [l.text, l.fill]), [['wallet.', '#0082BB'], ['jeff.eth', '#123456']]);
+  assert.equal(two.labelHeight, 158);
+
+  const name = parse(await v2({ text: 'jeff.eth' }));
+  assert.deepEqual(name.lines.map(l => [l.text, l.fill]), [['jeff.eth', '#0082BB']], 'a 2LD is one line in the accent');
 });
 
 test('international and CJK names use 85% of the width', async () => {
   for (const text of ['你好世界你好世界你好世界你好世界.eth', 'приветприветприветприветпривет.eth']) {
     const p = parse(await v2({ text }));
-    const narrow = await expectedSize(text, 398 * 0.85);
-    const full = await expectedSize(text, 398);
-    assert.equal(p.fontSize, narrow.fontSize, text);
-    assert.ok(narrow.fontSize < full.fontSize, `${text}: width must actually bind`);
-    assert.ok(p.accentX <= 506);
+    assert.ok(p.lines.length > 1, `${text}: long enough to break`);
+    assert.ok(p.labelWidth - 34 <= 398 * 0.85, `${text}: lines within 85% of the width, label ${p.labelWidth}`);
+    assert.equal(p.text, text);
+    assertLabelGeometry(p, text);
   }
 });
 
@@ -152,7 +210,7 @@ test('1000 × 1000: scaled group, same design-space label limit', async () => {
   const p = parse(svg);
   assert.ok(svg.includes(`<g transform="translate(0 0) scale(${1000 / 550})">`));
   assert.ok(svg.includes('<rect width="1000" height="1000" fill="#F6FBFD"/>'));
-  assert.equal(p.fontSize, (await expectedSize(text, 398)).fontSize);
+  assert.deepEqual(p.lines, parse(await v2({ text })).lines, 'same lines as at 550');
   assert.ok(p.accentX <= 506);
 });
 
@@ -163,9 +221,7 @@ test('1000 × 600: scale by the short edge, label may grow to width / k', async 
   const p = parse(svg);
   assert.ok(svg.includes(`<g transform="translate(0 ${600 - 550 * k}) scale(${k})">`));
   assert.ok(svg.includes('<rect width="1000" height="600" fill="#F6FBFD"/>'));
-  const wide = await expectedSize(text, 1000 / k - 152);
-  assert.equal(p.fontSize, wide.fontSize);
-  assert.ok(wide.fontSize > (await expectedSize(text, 398)).fontSize, 'wide card allows a bigger name');
+  assert.ok(p.lines.length < parse(await v2({ text })).lines.length, 'wide card fits more on a line');
   assert.ok(p.accentX <= 1000 / k - 12 - 32);
 });
 
@@ -291,12 +347,14 @@ test('measureText hook: called with unescaped text and the style features, label
   assert.equal(p.labelWidth, round3(34 + 'a&b.eth'.length * p.fontSize * 0.5));
 });
 
-test('measureText hook: drives the shrink like calculateFontSize, sync hooks work too', async () => {
+test('measureText hook: drives the line breaks, sync hooks work too', async () => {
   const measureText = (text, fontSize) => text.length * fontSize * 0.6; // synchronous
   const text = 'averyveryverylongensnamethatneedsshrinking.eth';
   const p = parse(await v2({ text, measureText }));
-  const expected = await calculateFontSize(text, 398, null, 12, 60, undefined, { features: FEATURES, measureText });
-  assert.equal(p.fontSize, expected.fontSize);
+  const widths = p.lines.map(l => measureText(l.text, p.fontSize));
+  assert.ok(p.lines.length > 1);
+  assert.equal(p.text, text);
+  assert.equal(p.labelWidth, round3(34 + Math.max(...widths)));
   assert.ok(p.accentX <= 506);
 });
 

@@ -82,7 +82,7 @@ const svgData = await createDynamicSVGImage({
   backgroundImageUrl: 'data:image/png;base64,...', // avatar; must be a data: URI
   // backgroundMarkup: '<g>...</g>', // used when there is no avatar
   // backgroundColor: '#F6FBFD',     // used when there is neither
-  // colors: { label: '#F6FBFD', accent: '#0082BB', logo: '#F6FBFD' },
+  // colors: { label: '#F6FBFD', accent: '#0082BB', logo: '#F6FBFD', parent: '#80C4E0' },
 });
 ```
 
@@ -104,11 +104,18 @@ const satoshiBase64 = btoa(String.fromCharCode(...new Uint8Array(satoshiBytes)))
 | `colors.label` | `'#F6FBFD'` | Name label. |
 | `colors.accent` | `'#0082BB'` | Logo tile, name and accent square. |
 | `colors.logo` | `'#F6FBFD'` | ENS logo. |
-| `maxFontSize` | `60` | In design units. 60 puts Satoshi Bold's ascenders 44.8 units above the baseline, as in the design. |
+| `colors.parent` | `'#80C4E0'` | A subname's parent labels (every line after the subname's first label). |
+| `maxFontSize` | `60` | In design units; caps the drawn size. 60 puts Satoshi Bold's ascenders 44.8 units above the baseline, as in the design. |
 | `measureText` | – | `(text, fontSize, { features }) => width`, sync or async. Measures the name instead of the built-in measurement. Pass the renderer's own measurement to get an exact label (see below). Gets the unescaped text. |
 | `fontFamily`, `fontBase64`, `customElements`, `fitMode` | as above | `customElements` paint on top of the card. `fitMode: 'exact'` has no effect in rasterize-wasm, which ignores `textLength`. |
 
-The name shrinks to fit the widest label that keeps the accent square 12 units from the right edge (398 units of text on a square card; wider cards allow more). International and CJK names get 85% of that width. As in the ENS style layout, the name never goes below 12 units: a name that doesn't fit at that size (about 55+ characters on a square card) runs past the right edge.
+The text area is the widest label that keeps the accent square 12 units from the right edge (398 units of text on a square card; wider cards allow more). International and CJK names get 85% of that width. The label's bottom stays at y = 508 and it grows upward, one line at a time, with the accent square on its top-right corner:
+
+- **Subnames** get one line per label: `second.` / `wallet.` / `jeff.eth`. The first line is in `colors.accent`, the parent labels in `colors.parent`. A name with one or two labels (`jeff.eth`) is a single line.
+- **The design's sizes** are tried in order: 64 (lines 70 apart), 48 and 28 (lines as far apart as the size). Satoshi is drawn at 60/64 of them, so 60, 45 and 26.25.
+- **At the first size**, each label stays on its own line and shrinks, down to 37.5, rather than break. A name a little too wide (`alabamaala.eth`) shrinks; a long one wraps.
+- **At 48 and 28**, a line wider than the text area breaks mid-word, between characters (`thisisalongchara` / `cternamethatke` / `eps.eth`).
+- The label's top may reach y = 90. A name too tall for that even at 28 keeps shrinking until it fits, down to 12.
 
 #### Exact labels with rasterize-wasm
 
