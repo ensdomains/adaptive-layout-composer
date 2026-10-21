@@ -113,7 +113,7 @@ The text area is the widest label that keeps the accent square 12 units from the
 
 - **Subnames** get one line per label: `second.` / `wallet.` / `jeff.eth`. The first line is in `colors.accent`, the parent labels in `colors.parent`. A name with one or two labels (`jeff.eth`) is a single line.
 - **The design's sizes** are tried in order: 64 (lines 70 apart), 48 and 28 (lines as far apart as the size). Satoshi is drawn at 60/64 of them, so 60, 45 and 26.25.
-- **At the first size**, each label stays on its own line and shrinks, down to 37.5, rather than break. A name a little too wide (`alabamaala.eth`) shrinks; a long one wraps.
+- **At the first size**, each label stays on its own line and shrinks, down to 37.5, rather than break, and the label's height and line spacing shrink with it so the accent square stays as close to the text. A name a little too wide (`alabamaala.eth`) shrinks; a long one wraps.
 - **At 48 and 28**, a line wider than the text area breaks mid-word, between characters (`thisisalongchara` / `cternamethatke` / `eps.eth`).
 - The label's top may reach y = 90. A name too tall for that even at 28 keeps shrinking until it fits, down to 12.
 

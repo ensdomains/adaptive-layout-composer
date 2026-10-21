@@ -606,8 +606,9 @@ const ensV2LabelHeight = (step, lineCount) => 2 * ENS_V2_LAYOUT.LABEL_PADDING_Y 
 /**
  * The name's lines at the first design size that fits: every line within maxWidth
  * and the label within maxHeight. At the first step each label stays on one line
- * and shrinks, down to SINGLE_LINE_MIN_SIZE, before any label is broken mid-word;
- * past the smallest step the size keeps shrinking until the label fits.
+ * and shrinks, down to SINGLE_LINE_MIN_SIZE, before any label is broken mid-word,
+ * and the label's height and line spacing shrink with it; past the smallest step
+ * the size keeps shrinking until the label fits.
  */
 async function layoutEnsV2Name(name, maxWidth, maxHeight, maxFontSize, measureAt) {
   const L = ENS_V2_LAYOUT;
@@ -620,7 +621,9 @@ async function layoutEnsV2Name(name, maxWidth, maxHeight, maxFontSize, measureAt
     for (let fontSize = scaled(first.size); fontSize >= scaled(L.SINGLE_LINE_MIN_SIZE); fontSize = round3(fontSize - 1)) {
       const widths = await Promise.all(segments.map(async text => (await measureAt(text, fontSize)).width));
       if (widths.every(width => width <= maxWidth)) {
-        return { step: first, fontSize, lines: segments.map((text, segment) => ({ text, width: widths[segment], segment })) };
+        const ratio = fontSize / scaled(first.size);
+        const step = { size: first.size * ratio, pitch: first.pitch * ratio, wrap: false };
+        return { step, fontSize, lines: segments.map((text, segment) => ({ text, width: widths[segment], segment })) };
       }
     }
   }
@@ -689,8 +692,8 @@ async function createEnsV2SVGImage(options) {
   const safeWidth = textAreaWidth * (1 - getTextMeasurementStrategy(measuredText).recommendedSafetyMargin);
   const measureAt = (t, size) => measureTextAccurate(t, size, fontFamily, { features: L.TEXT_FEATURES, measureText });
   const { step, fontSize, lines } = await layoutEnsV2Name(measuredText, safeWidth, L.LABEL_BOTTOM - L.LABEL_MIN_Y, maxFontSize, measureAt);
-  const labelHeight = ensV2LabelHeight(step, lines.length);
-  const labelY = L.LABEL_BOTTOM - labelHeight;
+  const labelHeight = round3(ensV2LabelHeight(step, lines.length));
+  const labelY = round3(L.LABEL_BOTTOM - labelHeight);
   const labelWidth = round3(2 * L.LABEL_PADDING_X + Math.max(...lines.map(line => line.width)));
   const labelRight = round3(L.LABEL_X + labelWidth);
   const firstBaseline = round3(labelY + L.LABEL_PADDING_Y + L.ASCENT * step.size);

@@ -88,8 +88,22 @@ test('a name a little too wide shrinks on one line, down to 37.5', async () => {
   assert.equal(p.lines.length, 1);
   assert.equal(p.fontSize, fontSize);
   assert.ok(p.fontSize < 60 && p.fontSize >= 37.5);
-  assert.equal(p.labelHeight, 88);
   assertLabelGeometry(p, text);
+});
+
+test('a shrunk name gets a proportionally shorter label, so the accent square stays as close to it', async () => {
+  const full = parse(await v2({ text: 'proto.eth' }));
+  const shrunk = parse(await v2({ text: 'alabamaala.eth' }));
+  const ratio = shrunk.fontSize / 60;
+  assert.equal(full.labelHeight, 88, 'a full-size name keeps the design label');
+  assert.equal(shrunk.labelHeight, round3(24 + 64 * ratio));
+  // The first baseline sits as far below the label top, scaled by the font.
+  assert.ok(Math.abs((shrunk.lines[0].y - shrunk.labelY) - (full.lines[0].y - full.labelY - 12) * ratio - 12) < 0.01);
+  assertLabelGeometry(shrunk, 'alabamaala.eth');
+
+  const subname = parse(await v2({ text: 'alabamaala.wallet.eth' }));
+  assert.equal(subname.lines.length, 2);
+  assert.equal(round3(subname.lines[1].y - subname.lines[0].y), round3(70 * subname.fontSize / 60), 'line spacing shrinks too');
 });
 
 test('a long name breaks mid-word onto lines at 45 and the label grows upward', async () => {
