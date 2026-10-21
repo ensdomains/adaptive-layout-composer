@@ -40,7 +40,7 @@ const ENS_V2_LAYOUT = {
   LABEL_PADDING_X: 17,                  // Space between the label edge and the name, each side
   LABEL_PADDING_Y: 12,
   ASCENT: 52 / 64,                      // First baseline below the text's top, per unit of design size
-  ACCENT_SIZE: 32,
+  ACCENT_SIZE: 40,
   RIGHT_MARGIN: 12,                     // Closest the accent square may get to the right edge
   CORNER_RADIUS: 6,
   // The design's text sizes, tried in order, with the distance between baselines; the

@@ -109,7 +109,7 @@ const satoshiBase64 = btoa(String.fromCharCode(...new Uint8Array(satoshiBytes)))
 | `measureText` | – | `(text, fontSize, { features }) => width`, sync or async. Measures the name instead of the built-in measurement. Pass the renderer's own measurement to get an exact label (see below). Gets the unescaped text. |
 | `fontFamily`, `fontBase64`, `customElements`, `fitMode` | as above | `customElements` paint on top of the card. `fitMode: 'exact'` has no effect in rasterize-wasm, which ignores `textLength`. |
 
-The text area is the widest label that keeps the accent square 12 units from the right edge (398 units of text on a square card; wider cards allow more). International and CJK names get 85% of that width. The label's bottom stays at y = 508 and it grows upward, one line at a time, with the accent square on its top-right corner:
+The text area is the widest label that keeps the 40-unit accent square 12 units from the right edge (390 units of text on a square card; wider cards allow more). International and CJK names get 85% of that width. The label's bottom stays at y = 508 and it grows upward, one line at a time, with the accent square on its top-right corner:
 
 - **Subnames** get one line per label: `second.` / `wallet.` / `jeff.eth`. The first line is in `colors.accent`, the parent labels in `colors.parent`. A name with one or two labels (`jeff.eth`) is a single line.
 - **The design's sizes** are tried in order: 64 (lines 70 apart), 48 and 28 (lines as far apart as the size). Satoshi is drawn at 60/64 of them, so 60, 45 and 26.25.

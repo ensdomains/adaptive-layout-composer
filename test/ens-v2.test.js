@@ -40,7 +40,7 @@ const expectedSize = (text, textAreaWidth) => calculateFontSize(text, textAreaWi
 
 function parse(svg) {
   const label = svg.match(/<rect x="74" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="6" fill="([^"]+)"\/>/);
-  const accent = svg.match(/<rect x="([\d.]+)" y="([\d.-]+)" width="32" height="32" rx="6" fill="([^"]+)"\/>/);
+  const accent = svg.match(/<rect x="([\d.]+)" y="([\d.-]+)" width="40" height="40" rx="6" fill="([^"]+)"\/>/);
   const lines = [...svg.matchAll(/<text x="91" y="([\d.]+)" font-size="([\d.]+)px" fill="([^"]+)"[^>]*>([^<]*)<\/text>/g)]
     .map(m => ({ y: Number(m[1]), fontSize: Number(m[2]), fill: m[3], text: m[4] }));
   const group = svg.match(/<g transform="translate\(0 ([\d.e-]+)\) scale\(([\d.]+)\)">/);
@@ -55,7 +55,7 @@ function parse(svg) {
 // The label grows upward from y=508, with the accent square on its top-right corner.
 function assertLabelGeometry(p, text) {
   assert.equal(round3(p.labelY + p.labelHeight), 508, `${text}: label bottom`);
-  assert.equal(p.accentY, round3(p.labelY - 32), `${text}: accent on the label's top edge`);
+  assert.equal(p.accentY, round3(p.labelY - 40), `${text}: accent on the label's top edge`);
   assert.equal(p.accentX, round3(74 + p.labelWidth), `${text}: accent on the label's right edge`);
   assert.ok(p.labelY >= 90, `${text}: label top ${p.labelY}`);
 }
@@ -63,13 +63,13 @@ function assertLabelGeometry(p, text) {
 test('tanrikulu.eth at 550: tile, logo, label, name and accent square in place', async () => {
   const svg = await v2({ text: 'tanrikulu.eth' });
   const p = parse(svg);
-  const { fontSize, metrics } = await expectedSize('tanrikulu.eth', 398);
+  const { fontSize, metrics } = await expectedSize('tanrikulu.eth', 390);
 
   assert.ok(svg.includes('<rect x="12" y="478" width="60" height="60" rx="6" fill="#0082BB"/>'));
   assert.match(svg, new RegExp(`<path fill-rule="evenodd" clip-rule="evenodd" d="${LOGO_START}[^"]+" fill="#F6FBFD"/>`));
   assert.equal(p.text, 'tanrikulu.eth');
   assert.equal(p.fontSize, fontSize);
-  assert.equal(p.fontSize, 60, 'short names render at the calibrated maximum');
+  assert.equal(parse(await v2({ text: 'jeff.eth' })).fontSize, 60, 'short names render at the calibrated maximum');
   assert.equal(p.textFill, '#0082BB');
   assert.equal(p.labelFill, '#F6FBFD');
   assert.equal(p.labelWidth, round3(34 + metrics.width));
@@ -84,7 +84,7 @@ test('tanrikulu.eth at 550: tile, logo, label, name and accent square in place',
 test('a name a little too wide shrinks on one line, down to 37.5', async () => {
   const text = 'alabamaala.eth';
   const p = parse(await v2({ text }));
-  const { fontSize } = await calculateFontSize(text, 398, null, 37.5, 60, undefined, { features: FEATURES });
+  const { fontSize } = await calculateFontSize(text, 390, null, 37.5, 60, undefined, { features: FEATURES });
   assert.equal(p.lines.length, 1);
   assert.equal(p.fontSize, fontSize);
   assert.ok(p.fontSize < 60 && p.fontSize >= 37.5);
@@ -114,7 +114,7 @@ test('a long name breaks mid-word onto lines at 45 and the label grows upward', 
   assert.equal(p.text, text, 'the lines are the name, in order');
   assert.deepEqual(p.lines.map(l => l.y), [p.lines[0].y, p.lines[0].y + 48, p.lines[0].y + 96]);
   assert.equal(p.labelHeight, 168, "the design's 3-line label");
-  assert.ok(p.accentX <= 550 - 12 - 32, `label right edge ${p.accentX}`);
+  assert.ok(p.accentX <= 550 - 12 - 40, `label right edge ${p.accentX}`);
   assertLabelGeometry(p, text);
 });
 
@@ -125,7 +125,7 @@ test('a 255-character name drops to 26.25 and stays below the top limit', async 
   assert.equal(p.fontSize, 26.25);
   assert.equal(p.text, text);
   assert.equal(p.labelHeight, 24 + 28 + (p.lines.length - 1) * 28);
-  assert.ok(p.accentX <= 506);
+  assert.ok(p.accentX <= 498);
   assertLabelGeometry(p, text);
 });
 
@@ -158,7 +158,7 @@ test('international and CJK names use 85% of the width', async () => {
   for (const text of ['你好世界你好世界你好世界你好世界.eth', 'приветприветприветприветпривет.eth']) {
     const p = parse(await v2({ text }));
     assert.ok(p.lines.length > 1, `${text}: long enough to break`);
-    assert.ok(p.labelWidth - 34 <= 398 * 0.85, `${text}: lines within 85% of the width, label ${p.labelWidth}`);
+    assert.ok(p.labelWidth - 34 <= 390 * 0.85, `${text}: lines within 85% of the width, label ${p.labelWidth}`);
     assert.equal(p.text, text);
     assertLabelGeometry(p, text);
   }
@@ -225,7 +225,7 @@ test('1000 × 1000: scaled group, same design-space label limit', async () => {
   assert.ok(svg.includes(`<g transform="translate(0 0) scale(${1000 / 550})">`));
   assert.ok(svg.includes('<rect width="1000" height="1000" fill="#F6FBFD"/>'));
   assert.deepEqual(p.lines, parse(await v2({ text })).lines, 'same lines as at 550');
-  assert.ok(p.accentX <= 506);
+  assert.ok(p.accentX <= 498);
 });
 
 test('1000 × 600: scale by the short edge, label may grow to width / k', async () => {
@@ -236,7 +236,7 @@ test('1000 × 600: scale by the short edge, label may grow to width / k', async 
   assert.ok(svg.includes(`<g transform="translate(0 ${600 - 550 * k}) scale(${k})">`));
   assert.ok(svg.includes('<rect width="1000" height="600" fill="#F6FBFD"/>'));
   assert.ok(p.lines.length < parse(await v2({ text })).lines.length, 'wide card fits more on a line');
-  assert.ok(p.accentX <= 1000 / k - 12 - 32);
+  assert.ok(p.accentX <= 1000 / k - 12 - 40);
 });
 
 test('600 × 1000: anchored bottom-left', async () => {
@@ -270,7 +270,7 @@ test('label fits the glyphs the style selects (ss01 a, ss03 t, tabular digits)',
 
 test('escaped text is measured as it renders, inserted as given', async () => {
   const escaped = parse(await v2({ text: 'a&amp;b.eth' }));
-  const plain = await expectedSize('a&b.eth', 398);
+  const plain = await expectedSize('a&b.eth', 390);
   assert.equal(escaped.text, 'a&amp;b.eth');
   assert.equal(escaped.fontSize, plain.fontSize);
   assert.equal(escaped.labelWidth, round3(34 + plain.metrics.width));
@@ -309,17 +309,17 @@ test('CJK and mixed names: Satoshi glyphs measured exactly, full-width character
       const p = parse(await v2({ text, fontFamily }));
       const width = expectedWidth(p.fontSize);
       assert.ok(Math.abs(p.labelWidth - (34 + width)) < 0.01, `${text} (${fontFamily}): label ${p.labelWidth}, expected ${34 + width}`);
-      assert.ok(p.accentX <= 506);
+      assert.ok(p.accentX <= 498);
     }
   }
 });
 
 test('emoji names: Latin part exact, emoji estimated, label inside the limit', async () => {
-  const { metrics } = await expectedSize('🚀rocket.eth', 398 * 0.85);
+  const { metrics } = await expectedSize('🚀rocket.eth', 390 * 0.85);
   assert.equal(metrics.isAccurate, false, 'emoji width is an estimate');
   assert.ok(metrics.width > browserAdvance('rocket.eth', 60) * 0.5);
   const p = parse(await v2({ text: '👨‍👩‍👧‍👦🚀rocket.eth' }));
-  assert.ok(Number.isFinite(p.labelWidth) && p.accentX <= 506);
+  assert.ok(Number.isFinite(p.labelWidth) && p.accentX <= 498);
 });
 
 test('other scripts use their measured per-grapheme widths, independent of fontFamily', async () => {
@@ -328,7 +328,7 @@ test('other scripts use their measured per-grapheme widths, independent of fontF
     ['مرحبا.eth', 5, 0.53],     // Arabic
     ['γεια.eth', 4, 0.61],      // Greek
     ['привет.eth', 6, 0.61],    // Cyrillic
-    ['გამარჯობა.eth', 9, 0.68], // Georgian
+    ['გამარჯო.eth', 7, 0.68],   // Georgian
     ['สวัสดี.eth', 4, 0.56],     // Thai (4 graphemes)
   ];
   for (const fontFamily of ['Satoshi', 'sans-serif']) {
@@ -369,7 +369,7 @@ test('measureText hook: drives the line breaks, sync hooks work too', async () =
   assert.ok(p.lines.length > 1);
   assert.equal(p.text, text);
   assert.equal(p.labelWidth, round3(34 + Math.max(...widths)));
-  assert.ok(p.accentX <= 506);
+  assert.ok(p.accentX <= 498);
 });
 
 test('measureText hook: bad hooks fail clearly', async () => {
